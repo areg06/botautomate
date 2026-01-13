@@ -27,10 +27,31 @@ if not os.getenv('BINANCE_API_KEY'):
     if os.path.exists(env_path):
         load_dotenv(env_path)
 
+# Import shared log storage
+from log_storage import log_storage
+
+# Custom log handler to store logs in memory for web display
+class WebLogHandler(logging.Handler):
+    """Log handler that stores logs in memory for web display."""
+    def emit(self, record):
+        """Store log record in memory."""
+        try:
+            log_entry = self.format(record)
+            log_storage.add_log(log_entry)
+        except Exception:
+            pass
+
+# Create web log handler
+web_log_handler = WebLogHandler()
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Console output
+        web_log_handler  # Web display
+    ]
 )
 logger = logging.getLogger(__name__)
 
