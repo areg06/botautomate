@@ -380,14 +380,33 @@ class TelegramSignalListener:
         self.client = TelegramClient(session_path, self.api_id, self.api_hash)
         
         try:
+            # Check if we're in an interactive environment
+            import sys
+            is_interactive = sys.stdin.isatty()
+            
+            if not is_interactive:
+                logger.warning("Non-interactive environment detected. Checking for existing session...")
+            
             await self.client.start()
             
             # Check if password is needed
             if not await self.client.is_user_authorized():
-                logger.warning("Telegram session not authorized. Please authenticate.")
+                if not is_interactive:
+                    logger.error("=" * 60)
+                    logger.error("TELEGRAM AUTHENTICATION REQUIRED")
+                    logger.error("=" * 60)
+                    logger.error("Please use Railway's web shell to authenticate:")
+                    logger.error("1. Go to Railway dashboard → Your deployment")
+                    logger.error("2. Click 'View Logs' → Click 'Open Shell' button")
+                    logger.error("3. Run: python3 trading_bot.py")
+                    logger.error("4. Enter your phone number and verification code")
+                    logger.error("5. Session will be saved automatically")
+                    logger.error("=" * 60)
                 raise SessionPasswordNeededError("2FA password required")
             
             logger.info("Telegram client initialized successfully")
+        except SessionPasswordNeededError:
+            raise
         except Exception as e:
             logger.error(f"Failed to initialize Telegram client: {e}")
             logger.info("If this is first run, you need to authenticate interactively.")
