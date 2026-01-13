@@ -472,22 +472,35 @@ class TelegramSignalListener:
             else:
                 error_msg = str(e)
                 # Check for connection errors (common on PythonAnywhere)
-                if "ConnectionRefusedError" in error_msg or "Connection failed" in error_msg or "Connect call failed" in error_msg:
+                connection_errors = [
+                    "ConnectionRefusedError",
+                    "Connection failed",
+                    "Connect call failed",
+                    "Connection to Telegram failed"
+                ]
+                
+                if any(err in error_msg for err in connection_errors):
+                    logger.error("")
                     logger.error("=" * 60)
-                    logger.error("TELEGRAM CONNECTION ERROR")
+                    logger.error("❌ TELEGRAM CONNECTION ERROR")
                     logger.error("=" * 60)
                     logger.error("Cannot connect to Telegram servers.")
                     logger.error("")
                     logger.error("This is likely due to network restrictions:")
-                    logger.error("1. PythonAnywhere free accounts block outbound connections")
-                    logger.error("2. You may need a paid PythonAnywhere account")
-                    logger.error("3. Or use Railway/Render which allow outbound connections")
                     logger.error("")
-                    logger.error("Alternative hosting options:")
-                    logger.error("- Railway.app (free tier available)")
-                    logger.error("- Render.com (free tier available)")
-                    logger.error("- Oracle Cloud Always Free VPS")
+                    logger.error("🔴 PythonAnywhere FREE accounts block outbound connections!")
+                    logger.error("   - Free accounts can only make HTTP/HTTPS to whitelisted domains")
+                    logger.error("   - Telegram's MTProto protocol is blocked")
+                    logger.error("   - You need a PAID account ($5/month) to use Telegram")
+                    logger.error("")
+                    logger.error("✅ Alternative FREE hosting options:")
+                    logger.error("   1. Railway.app - $5 credit/month (recommended)")
+                    logger.error("   2. Render.com - 750 hours/month free")
+                    logger.error("   3. Oracle Cloud - Always Free VPS")
+                    logger.error("")
+                    logger.error("All of these allow outbound connections to Telegram.")
                     logger.error("=" * 60)
+                    logger.error("")
                 else:
                     logger.error(f"Failed to initialize Telegram client: {e}")
                     logger.info("If this is first run, you need to authenticate interactively.")
@@ -616,7 +629,26 @@ async def main():
         sys.exit(1)
     except Exception as e:
         error_msg = str(e)
-        if "Could not find a matching Constructor ID" in error_msg or "misusing the session" in error_msg:
+        # Check for connection errors
+        connection_errors = [
+            "ConnectionRefusedError",
+            "Connection failed",
+            "Connect call failed",
+            "Connection to Telegram failed"
+        ]
+        
+        if any(err in error_msg for err in connection_errors):
+            logger.error("")
+            logger.error("=" * 60)
+            logger.error("❌ TELEGRAM CONNECTION ERROR")
+            logger.error("=" * 60)
+            logger.error("Cannot connect to Telegram servers.")
+            logger.error("")
+            logger.error("🔴 PythonAnywhere FREE accounts block outbound connections!")
+            logger.error("   Upgrade to paid account OR switch to Railway/Render")
+            logger.error("=" * 60)
+            logger.error("")
+        elif "Could not find a matching Constructor ID" in error_msg or "misusing the session" in error_msg:
             logger.error("Session corruption detected in main loop. Bot will exit.")
             logger.error("Please re-authenticate using: railway shell -> python3 trading_bot.py")
         else:
