@@ -18,48 +18,52 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.send_header('Content-type', 'text/html')
             self.end_headers()
             
-            html = """
+            # Get environment variables
+            dry_run = os.getenv('DRY_RUN', 'true')
+            channel_id = os.getenv('TELEGRAM_CHANNEL_ID', 'Not set')
+            
+            html = f"""
             <!DOCTYPE html>
             <html>
             <head>
                 <title>Trading Bot Status</title>
                 <style>
-                    body {
+                    body {{
                         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
                         max-width: 800px;
                         margin: 50px auto;
                         padding: 20px;
                         background: #f5f5f5;
-                    }
-                    .container {
+                    }}
+                    .container {{
                         background: white;
                         padding: 30px;
                         border-radius: 10px;
                         box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                    }
-                    h1 {
+                    }}
+                    h1 {{
                         color: #333;
                         margin-top: 0;
-                    }
-                    .status {
+                    }}
+                    .status {{
                         padding: 15px;
                         background: #4CAF50;
                         color: white;
                         border-radius: 5px;
                         margin: 20px 0;
-                    }
-                    .info {
+                    }}
+                    .info {{
                         background: #f9f9f9;
                         padding: 15px;
                         border-radius: 5px;
                         margin: 10px 0;
-                    }
-                    .code {
+                    }}
+                    .code {{
                         background: #f4f4f4;
                         padding: 2px 6px;
                         border-radius: 3px;
                         font-family: monospace;
-                    }
+                    }}
                 </style>
             </head>
             <body>
@@ -83,15 +87,12 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                         </ul>
                     </div>
                     <div class="info">
-                        <p><strong>Note:</strong> Check Railway logs for detailed activity and signal detection.</p>
+                        <p><strong>Note:</strong> Check Render logs for detailed activity and signal detection.</p>
                     </div>
                 </div>
             </body>
             </html>
-            """.format(
-                dry_run=os.getenv('DRY_RUN', 'true'),
-                channel_id=os.getenv('TELEGRAM_CHANNEL_ID', 'Not set')
-            )
+            """
             
             self.wfile.write(html.encode())
         else:
