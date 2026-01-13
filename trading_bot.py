@@ -374,6 +374,29 @@ class TelegramSignalListener:
         self.parser = SignalParser()
         self.client = None
     
+    def _delete_corrupted_session(self, session_path: str):
+        """Delete corrupted session files."""
+        session_file = f"{session_path}.session"
+        journal_file = f"{session_path}.session-journal"
+        
+        deleted = False
+        if os.path.exists(session_file):
+            try:
+                os.remove(session_file)
+                logger.warning(f"Deleted corrupted session file: {session_file}")
+                deleted = True
+            except Exception as e:
+                logger.error(f"Failed to delete session file: {e}")
+        
+        if os.path.exists(journal_file):
+            try:
+                os.remove(journal_file)
+                logger.warning(f"Deleted session journal file: {journal_file}")
+            except Exception as e:
+                logger.error(f"Failed to delete journal file: {e}")
+        
+        return deleted
+    
     async def initialize(self):
         """Initialize Telegram client."""
         # Use absolute path for session file to ensure persistence in cloud environments
@@ -396,12 +419,11 @@ class TelegramSignalListener:
                     logger.error("=" * 60)
                     logger.error("TELEGRAM AUTHENTICATION REQUIRED")
                     logger.error("=" * 60)
-                    logger.error("Please use Railway's web shell to authenticate:")
-                    logger.error("1. Go to Railway dashboard → Your deployment")
-                    logger.error("2. Click 'View Logs' → Click 'Open Shell' button")
-                    logger.error("3. Run: python3 trading_bot.py")
-                    logger.error("4. Enter your phone number and verification code")
-                    logger.error("5. Session will be saved automatically")
+                    logger.error("Please use Railway CLI to authenticate:")
+                    logger.error("1. Run: railway shell")
+                    logger.error("2. Run: python3 trading_bot.py")
+                    logger.error("3. Enter your phone number and verification code")
+                    logger.error("4. Session will be saved automatically")
                     logger.error("=" * 60)
                 raise SessionPasswordNeededError("2FA password required")
             
@@ -409,8 +431,31 @@ class TelegramSignalListener:
         except SessionPasswordNeededError:
             raise
         except Exception as e:
-            logger.error(f"Failed to initialize Telegram client: {e}")
-            logger.info("If this is first run, you need to authenticate interactively.")
+            error_msg = str(e)
+            # Check for session corruption errors
+            if "Could not find a matching Constructor ID" in error_msg or "misusing the session" in error_msg:
+                logger.error("=" * 60)
+                logger.error("SESSION CORRUPTION DETECTED")
+                logger.error("=" * 60)
+                logger.error("The Telegram session file is corrupted and will be deleted.")
+                logger.error("You need to re-authenticate.")
+                
+                # Delete corrupted session
+                if self._delete_corrupted_session(session_path):
+                    logger.info("Corrupted session deleted. Please re-authenticate.")
+                    logger.error("=" * 60)
+                    logger.error("RE-AUTHENTICATION REQUIRED")
+                    logger.error("=" * 60)
+                    logger.error("Please use Railway CLI to authenticate:")
+                    logger.error("1. Run: railway shell")
+                    logger.error("2. Run: python3 trading_bot.py")
+                    logger.error("3. Enter your phone number and verification code")
+                    logger.error("=" * 60)
+                
+                raise SessionPasswordNeededError("Session corrupted, re-authentication required")
+            else:
+                logger.error(f"Failed to initialize Telegram client: {e}")
+                logger.info("If this is first run, you need to authenticate interactively.")
             raise
     
     async def handle_message(self, event):
@@ -517,8 +562,23 @@ async def main():
         await listener.start_listening()
     except KeyboardInterrupt:
         logger.info("Received interrupt signal, shutting down...")
+    except SessionPasswordNeededError as e:
+        logger.error(f"Session authentication error: {e}")
+        logger.error("Bot will exit. Please re-authenticate using Railway CLI shell.")
+        await listener.stop()
+        # Exit with error code so Railway knows to restart
+        import sys
+        sys.exit(1)
     except Exception as e:
-        logger.error(f"Error in main loop: {e}")
+        error_msg = str(e)
+        if "Could not find a matching Constructor ID" in error_msg or "misusing the session" in error_msg:
+            logger.error("Session corruption detected in main loop. Bot will exit.")
+            logger.error("Please re-authenticate using: railway shell -> python3 trading_bot.py")
+        else:
+            logger.error(f"Error in main loop: {e}")
+        await listener.stop()
+        import sys
+        sys.exit(1)
     finally:
         await listener.stop()
 
