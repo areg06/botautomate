@@ -101,6 +101,12 @@ git push -u origin main
 
 ## Troubleshooting
 
+### Python version installation error
+If you see: `mise ERROR Failed to install core:python@3.11.0`
+- **Solution 1**: Update `runtime.txt` to `python-3.12` (already done)
+- **Solution 2**: Remove `runtime.txt` entirely and let Railway auto-detect Python
+- **Solution 3**: Add environment variable `RAILPACK_PYTHON_VERSION=3.12` in Railway dashboard
+
 ### Bot won't start
 - Check logs for errors
 - Verify all environment variables are set
