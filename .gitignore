@@ -26,10 +26,6 @@ wheels/
 .installed.cfg
 *.egg
 
-# Telethon session files
-*.session
-*.session-journal
-
 # IDE
 .vscode/
 .idea/

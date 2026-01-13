@@ -57,17 +57,24 @@ git push -u origin main
    - Railway should auto-detect this from the Procfile
 
 5. **First-Time Telegram Authentication**:
-   - Go to "Deployments" tab
-   - Click on the latest deployment
-   - Click "View Logs"
-   - You'll see: "Please enter your phone (or bot token):"
-   - Click "Open Shell" button (top right of logs)
-   - In the shell, run: `python3 trading_bot.py`
-   - Enter your phone number (with country code, e.g., +1234567890)
-   - Enter the verification code sent to your Telegram
-   - If you have 2FA, enter your password
-   - The session file will be saved automatically
-   - Close the shell and the bot will restart with the saved session
+   
+   Railway doesn't have a web shell. Use one of these methods:
+   
+   **Method A: Upload Session File (Easiest)**:
+   1. Authenticate locally: `python3 trading_bot.py` (enter phone/code)
+   2. Install Railway CLI: `npm i -g @railway/cli` or `brew install railway`
+   3. Login: `railway login`
+   4. Link project: `railway link`
+   5. Upload session: Copy `trading_bot_session.session` to Railway
+   
+   **Method B: Use Railway CLI Shell**:
+   1. Install Railway CLI: `npm i -g @railway/cli`
+   2. Login: `railway login`
+   3. Link: `railway link`
+   4. Open shell: `railway shell`
+   5. Run: `python3 trading_bot.py` (enter phone/code)
+   
+   See `RAILWAY_AUTH.md` for detailed instructions.
 
 6. **Monitor Your Bot**:
    - Go to "Deployments" → "View Logs" to see real-time logs
