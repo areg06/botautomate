@@ -112,7 +112,7 @@ class SignalParser:
                 symbol=symbol,
                 leverage=leverage,
                 entry_price=entry_price,
-                targets=targets[:3]  # Only take first 3 targets
+                targets=targets[:2]  # Only take first 2 targets (60% and 40%)
             )
             
             logger.info(f"Parsed signal: {signal.direction} {signal.symbol} @ {signal.entry_price} "
@@ -203,6 +203,7 @@ class BinanceFuturesTrader:
     def calculate_position_size(self, balance: float, entry_price: float, leverage: float) -> float:
         """
         Calculate position size based on balance and leverage.
+        Uses 15% of account balance.
         
         Args:
             balance: Available USDT balance
@@ -212,8 +213,8 @@ class BinanceFuturesTrader:
         Returns:
             Position size in base currency
         """
-        # Use 95% of balance to leave some margin
-        usable_balance = balance * 0.95
+        # Use 15% of balance for position
+        usable_balance = balance * 0.15
         # Position size = (balance * leverage) / entry_price
         position_size = (usable_balance * leverage) / entry_price
         return float(Decimal(str(position_size)).quantize(Decimal('0.001'), rounding=ROUND_DOWN))
@@ -262,6 +263,88 @@ class BinanceFuturesTrader:
             logger.error(f"Error placing market order: {e}")
             return None
     
+    def place_stop_loss_order(self, signal: TradingSignal, entry_price: float, 
+                              position_size: float, leverage: float) -> Optional[str]:
+        """
+        Place a stop loss order at -170% ROI.
+        
+        Args:
+            signal: Trading signal
+            entry_price: Entry price
+            position_size: Full position size
+            leverage: Leverage multiplier
+        
+        Returns:
+            Order ID if successful, None otherwise
+        """
+        try:
+            # Calculate stop loss price for -170% ROI
+            # ROI = (SL - entry) / entry * leverage = -1.70
+            # (SL - entry) / entry = -1.70 / leverage
+            # SL = entry * (1 - 1.70 / leverage)
+            
+            if signal.direction == "BUY":
+                # For LONG: SL below entry
+                sl_price = entry_price * (1 - 1.70 / leverage)
+            else:
+                # For SHORT: SL above entry
+                sl_price = entry_price * (1 + 1.70 / leverage)
+            
+            # For stop loss, we need to close the position
+            # If we bought (long), we sell to stop loss
+            # If we sold (short), we buy to stop loss
+            side = 'sell' if signal.direction == "BUY" else 'buy'
+            
+            if self.dry_run:
+                logger.info(f"[DRY RUN] Would place stop loss: "
+                          f"{side} {position_size} {signal.symbol} @ {sl_price:.6f} (-170% ROI)")
+                return "dry_run_sl"
+            
+            logger.info(f"Placing stop loss: {side} {position_size} {signal.symbol} @ {sl_price:.6f}...")
+            # Binance Futures uses STOP_MARKET for stop loss
+            # Format: create_order with type='STOP_MARKET' and stopPrice in params
+            try:
+                order = self.exchange.create_order(
+                    symbol=signal.symbol,
+                    type='STOP_MARKET',
+                    side=side,
+                    amount=position_size,
+                    params={
+                        'stopPrice': sl_price,
+                        'reduceOnly': True  # Only close position, don't open new one
+                    }
+                )
+            except Exception as e:
+                # Fallback: try alternative stop loss format
+                logger.warning(f"Stop market order failed, trying alternative: {e}")
+                try:
+                    # Alternative: use stop limit with tight spread
+                    price_offset = sl_price * 0.001  # 0.1% offset
+                    limit_price = sl_price - price_offset if side == 'sell' else sl_price + price_offset
+                    order = self.exchange.create_order(
+                        symbol=signal.symbol,
+                        type='STOP',
+                        side=side,
+                        amount=position_size,
+                        price=limit_price,
+                        params={
+                            'stopPrice': sl_price,
+                            'reduceOnly': True
+                        }
+                    )
+                except Exception as e2:
+                    logger.error(f"All stop loss methods failed: {e2}")
+                    raise
+            
+            order_id = order.get('id')
+            logger.info(f"✅ Successfully placed stop loss: {order_id} "
+                       f"for {position_size} {signal.symbol} @ {sl_price:.6f} (-170% ROI)")
+            return order_id
+            
+        except Exception as e:
+            logger.error(f"Error placing stop loss order: {e}")
+            return None
+    
     def place_take_profit_order(self, signal: TradingSignal, target_price: float, 
                                 position_size: float, order_num: int) -> Optional[str]:
         """
@@ -270,8 +353,8 @@ class BinanceFuturesTrader:
         Args:
             signal: Trading signal
             target_price: Target price for take profit
-            position_size: Position size to close (33% of total)
-            order_num: Order number (1, 2, or 3)
+            position_size: Position size to close (60% for first, 40% for second)
+            order_num: Order number (1 or 2)
         
         Returns:
             Order ID if successful, None otherwise
@@ -345,22 +428,48 @@ class BinanceFuturesTrader:
                 logger.error("Failed to place entry order")
                 return False
             
-            # Step 5: Place take profit orders (33% each for first 3 targets)
-            target_size = position_size / 3.0
-            target_size = float(Decimal(str(target_size)).quantize(Decimal('0.001'), rounding=ROUND_DOWN))
+            # Step 5: Place stop loss order (-170% ROI)
+            sl_order_id = self.place_stop_loss_order(
+                signal, signal.entry_price, position_size, signal.leverage
+            )
+            if not sl_order_id:
+                logger.warning("Failed to place stop loss order")
+            
+            # Step 6: Place take profit orders (60% first, 40% second - only first 2 targets)
+            if len(signal.targets) < 2:
+                logger.warning(f"Signal has only {len(signal.targets)} target(s), need at least 2")
+                return False
+            
+            # First TP: 60% of position
+            tp1_size = position_size * 0.60
+            tp1_size = float(Decimal(str(tp1_size)).quantize(Decimal('0.001'), rounding=ROUND_DOWN))
+            
+            # Second TP: 40% of position
+            tp2_size = position_size * 0.40
+            tp2_size = float(Decimal(str(tp2_size)).quantize(Decimal('0.001'), rounding=ROUND_DOWN))
             
             tp_orders = []
-            for i, target_price in enumerate(signal.targets[:3], 1):
-                tp_order_id = self.place_take_profit_order(
-                    signal, target_price, target_size, i
-                )
-                if tp_order_id:
-                    tp_orders.append(tp_order_id)
-                else:
-                    logger.warning(f"Failed to place take profit order {i}")
+            
+            # Place first take profit (60%)
+            tp1_order_id = self.place_take_profit_order(
+                signal, signal.targets[0], tp1_size, 1
+            )
+            if tp1_order_id:
+                tp_orders.append(tp1_order_id)
+            else:
+                logger.warning("Failed to place take profit order 1")
+            
+            # Place second take profit (40%)
+            tp2_order_id = self.place_take_profit_order(
+                signal, signal.targets[1], tp2_size, 2
+            )
+            if tp2_order_id:
+                tp_orders.append(tp2_order_id)
+            else:
+                logger.warning("Failed to place take profit order 2")
             
             logger.info(f"Successfully executed signal: Entry order {entry_order_id}, "
-                       f"{len(tp_orders)} take profit orders placed")
+                       f"Stop loss {sl_order_id}, {len(tp_orders)} take profit orders placed")
             
             return True
             
