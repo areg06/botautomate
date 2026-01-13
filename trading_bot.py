@@ -435,23 +435,23 @@ class BinanceFuturesTrader:
             if not sl_order_id:
                 logger.warning("Failed to place stop loss order")
             
-            # Step 6: Place take profit orders (close 60% at first TP, 40% at second TP)
+            # Step 6: Place take profit orders
+            # Close 60% of position at first TP price, 40% at second TP price
             if len(signal.targets) < 2:
                 logger.warning(f"Signal has only {len(signal.targets)} target(s), need at least 2")
                 return False
             
-            # First TP: Close 60% of position at first target price
+            # Calculate sizes: 60% of position for first TP, 40% for second TP
             tp1_size = position_size * 0.60
             tp1_size = float(Decimal(str(tp1_size)).quantize(Decimal('0.001'), rounding=ROUND_DOWN))
             
-            # Second TP: Close 40% of position at second target price
             tp2_size = position_size * 0.40
             tp2_size = float(Decimal(str(tp2_size)).quantize(Decimal('0.001'), rounding=ROUND_DOWN))
             
             tp_orders = []
             
-            # Place first take profit: Close 60% of position at first target price
-            logger.info(f"Placing TP1: Close {tp1_size} ({tp1_size/position_size*100:.1f}%) at target price {signal.targets[0]}")
+            # Place first take profit: Close 60% of position at first target price from signal
+            logger.info(f"TP1: Closing {tp1_size} ({60:.0f}% of {position_size}) at price {signal.targets[0]}")
             tp1_order_id = self.place_take_profit_order(
                 signal, signal.targets[0], tp1_size, 1
             )
@@ -460,8 +460,8 @@ class BinanceFuturesTrader:
             else:
                 logger.warning("Failed to place take profit order 1")
             
-            # Place second take profit: Close 40% of position at second target price
-            logger.info(f"Placing TP2: Close {tp2_size} ({tp2_size/position_size*100:.1f}%) at target price {signal.targets[1]}")
+            # Place second take profit: Close 40% of position at second target price from signal
+            logger.info(f"TP2: Closing {tp2_size} ({40:.0f}% of {position_size}) at price {signal.targets[1]}")
             tp2_order_id = self.place_take_profit_order(
                 signal, signal.targets[1], tp2_size, 2
             )
