@@ -470,8 +470,27 @@ class TelegramSignalListener:
                 
                 raise SessionPasswordNeededError("Session corrupted, re-authentication required")
             else:
-                logger.error(f"Failed to initialize Telegram client: {e}")
-                logger.info("If this is first run, you need to authenticate interactively.")
+                error_msg = str(e)
+                # Check for connection errors (common on PythonAnywhere)
+                if "ConnectionRefusedError" in error_msg or "Connection failed" in error_msg or "Connect call failed" in error_msg:
+                    logger.error("=" * 60)
+                    logger.error("TELEGRAM CONNECTION ERROR")
+                    logger.error("=" * 60)
+                    logger.error("Cannot connect to Telegram servers.")
+                    logger.error("")
+                    logger.error("This is likely due to network restrictions:")
+                    logger.error("1. PythonAnywhere free accounts block outbound connections")
+                    logger.error("2. You may need a paid PythonAnywhere account")
+                    logger.error("3. Or use Railway/Render which allow outbound connections")
+                    logger.error("")
+                    logger.error("Alternative hosting options:")
+                    logger.error("- Railway.app (free tier available)")
+                    logger.error("- Render.com (free tier available)")
+                    logger.error("- Oracle Cloud Always Free VPS")
+                    logger.error("=" * 60)
+                else:
+                    logger.error(f"Failed to initialize Telegram client: {e}")
+                    logger.info("If this is first run, you need to authenticate interactively.")
             raise
     
     async def handle_message(self, event):
@@ -527,9 +546,19 @@ class TelegramSignalListener:
 def start_web_server():
     """Start the web server in a separate thread."""
     try:
-        from web_server import start_web_server
-        port = int(os.getenv('PORT', 8000))
-        start_web_server(port)
+        import sys
+        import importlib.util
+        
+        # Try to import web_server module
+        web_server_path = os.path.join(os.path.dirname(__file__), 'web_server.py')
+        if os.path.exists(web_server_path):
+            spec = importlib.util.spec_from_file_location("web_server", web_server_path)
+            web_server = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(web_server)
+            port = int(os.getenv('PORT', 8000))
+            web_server.start_web_server(port)
+        else:
+            logger.warning("web_server.py not found, skipping web server")
     except Exception as e:
         logger.warning(f"Could not start web server: {e}")
 

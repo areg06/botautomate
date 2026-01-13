@@ -1,5 +1,20 @@
 # PythonAnywhere Setup Guide
 
+## ⚠️ Important: Connection Restrictions
+
+**PythonAnywhere FREE accounts block outbound connections to Telegram!**
+
+- Free accounts can only make HTTP/HTTPS requests to whitelisted domains
+- Telegram's MTProto protocol uses port 443 which is blocked
+- **You need a PAID PythonAnywhere account ($5/month) to use Telegram**
+
+**Alternative free hosting options:**
+- Railway.app (free tier: $5 credit/month)
+- Render.com (free tier: 750 hours/month)
+- Oracle Cloud Always Free (permanent free VPS)
+
+If you're on a free account, consider switching to one of the alternatives above.
+
 ## Setting Up Environment Variables (.env file)
 
 PythonAnywhere doesn't support `.env` files directly, but you can set environment variables in the web interface.
