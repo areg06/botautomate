@@ -8,6 +8,7 @@ import os
 import re
 import asyncio
 import logging
+import threading
 from typing import Optional, Dict, List
 from decimal import Decimal, ROUND_DOWN
 from dataclasses import dataclass
@@ -462,8 +463,23 @@ class TelegramSignalListener:
             logger.info("Telegram client disconnected")
 
 
+def start_web_server():
+    """Start the web server in a separate thread."""
+    try:
+        from web_server import start_web_server
+        port = int(os.getenv('PORT', 8000))
+        start_web_server(port)
+    except Exception as e:
+        logger.warning(f"Could not start web server: {e}")
+
+
 async def main():
     """Main entry point."""
+    # Start web server in background thread
+    web_thread = threading.Thread(target=start_web_server, daemon=True)
+    web_thread.start()
+    logger.info("Web server started on background thread")
+    
     # Load configuration from environment
     api_key = os.getenv('BINANCE_API_KEY')
     api_secret = os.getenv('BINANCE_API_SECRET')
