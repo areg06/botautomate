@@ -42,9 +42,9 @@
      TELEGRAM_API_HASH=your_telegram_api_hash
      TELEGRAM_CHANNEL_ID=your_channel_id
      DRY_RUN=true
-     PORT=10000
      ```
    - **Important**: Set `DRY_RUN=true` initially for testing!
+   - **Note**: `PORT` is automatically set by Render (don't need to set it manually)
 
 5. **Deploy**:
    - Click "Create Web Service"
@@ -114,7 +114,7 @@ TELEGRAM_APP_ID=your_telegram_app_id
 TELEGRAM_API_HASH=your_telegram_api_hash
 TELEGRAM_CHANNEL_ID=your_channel_id
 DRY_RUN=true          # Set to false for live trading
-PORT=10000            # Render sets PORT automatically, but we can specify
+# PORT is automatically set by Render - no need to specify
 ```
 
 ## Troubleshooting
