@@ -19,7 +19,13 @@ import ccxt
 from ccxt.base.errors import InsufficientFunds, NetworkError, ExchangeError
 
 # Load environment variables
+# Try to load from .env file in current directory, or use system environment variables
 load_dotenv()
+# Also try loading from absolute path (useful for PythonAnywhere)
+if not os.getenv('BINANCE_API_KEY'):
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
 
 # Configure logging
 logging.basicConfig(
@@ -139,13 +145,18 @@ class BinanceFuturesTrader:
             'options': {
                 'defaultType': 'future',  # Use futures
             },
-            'sandbox': dry_run,  # Use testnet if dry run
+            'sandbox': False,  # Always use live API, dry_run just prevents execution
         })
         
         if dry_run:
-            logger.info("DRY RUN MODE: No actual trades will be executed")
+            logger.warning("=" * 60)
+            logger.warning("⚠️  DRY RUN MODE: No actual trades will be executed")
+            logger.warning("=" * 60)
+            logger.warning("To execute real trades, set DRY_RUN=false in environment variables")
         else:
-            logger.info("LIVE MODE: Trades will be executed on Binance Futures")
+            logger.warning("=" * 60)
+            logger.warning("🚨 LIVE MODE: Trades WILL be executed on Binance Futures")
+            logger.warning("=" * 60)
     
     def set_leverage(self, symbol: str, leverage: int) -> bool:
         """
@@ -164,8 +175,9 @@ class BinanceFuturesTrader:
                 return True
             
             # Binance futures uses set_leverage method
+            logger.info(f"Setting leverage to {leverage}X for {symbol}...")
             self.exchange.set_leverage(leverage, symbol)
-            logger.info(f"Set leverage to {leverage}X for {symbol}")
+            logger.info(f"✅ Successfully set leverage to {leverage}X for {symbol}")
             return True
             
         except Exception as e:
@@ -225,15 +237,17 @@ class BinanceFuturesTrader:
                           f"{position_size} {signal.symbol} @ market price")
                 return "dry_run_order_id"
             
+            logger.info(f"Placing {side} market order: {position_size} {signal.symbol}...")
             order = self.exchange.create_market_order(
                 symbol=signal.symbol,
                 side=side,
                 amount=position_size
             )
             
-            logger.info(f"Placed {side} market order: {order.get('id')} "
-                       f"for {position_size} {signal.symbol}")
-            return order.get('id')
+            order_id = order.get('id')
+            logger.info(f"✅ Successfully placed {side} market order: {order_id} "
+                       f"for {position_size} {signal.symbol} @ {order.get('price', 'market price')}")
+            return order_id
             
         except InsufficientFunds as e:
             logger.error(f"Insufficient funds: {e}")
@@ -273,6 +287,7 @@ class BinanceFuturesTrader:
                           f"{side} {position_size} {signal.symbol} @ {target_price}")
                 return f"dry_run_tp_{order_num}"
             
+            logger.info(f"Placing take profit {order_num}: {side} {position_size} {signal.symbol} @ {target_price}...")
             order = self.exchange.create_limit_order(
                 symbol=signal.symbol,
                 side=side,
@@ -280,9 +295,10 @@ class BinanceFuturesTrader:
                 price=target_price
             )
             
-            logger.info(f"Placed take profit {order_num}: {order.get('id')} "
+            order_id = order.get('id')
+            logger.info(f"✅ Successfully placed take profit {order_num}: {order_id} "
                        f"for {position_size} {signal.symbol} @ {target_price}")
-            return order.get('id')
+            return order_id
             
         except Exception as e:
             logger.error(f"Error placing take profit order {order_num}: {e}")
