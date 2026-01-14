@@ -202,7 +202,38 @@ class BinanceFuturesTrader:
             return True
             
         except Exception as e:
+            error_msg = str(e)
             logger.error(f"Error setting leverage: {e}")
+            
+            # Check for specific Binance API errors
+            if "-2015" in error_msg or "Invalid API-key" in error_msg or "permissions" in error_msg:
+                logger.error("=" * 60)
+                logger.error("❌ BINANCE API PERMISSION ERROR")
+                logger.error("=" * 60)
+                logger.error("Your Binance API key doesn't have the required permissions.")
+                logger.error("")
+                logger.error("To fix this:")
+                logger.error("1. Go to Binance → API Management")
+                logger.error("2. Edit your API key")
+                logger.error("3. Enable 'Enable Futures' permission")
+                logger.error("4. If using IP whitelist, add Render's IP or disable whitelist")
+                logger.error("5. Save and wait 5 minutes for changes to take effect")
+                logger.error("=" * 60)
+            elif "IP" in error_msg or "whitelist" in error_msg.lower():
+                logger.error("=" * 60)
+                logger.error("❌ BINANCE IP WHITELIST ERROR")
+                logger.error("=" * 60)
+                logger.error("Your IP is not whitelisted in Binance API settings.")
+                logger.error("")
+                logger.error("To fix this:")
+                logger.error("1. Go to Binance → API Management")
+                logger.error("2. Edit your API key")
+                logger.error("3. Either:")
+                logger.error("   - Disable IP whitelist (less secure)")
+                logger.error("   - Add Render's server IPs to whitelist")
+                logger.error("4. Save changes")
+                logger.error("=" * 60)
+            
             return False
     
     def get_balance(self) -> Optional[float]:
