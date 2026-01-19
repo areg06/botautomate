@@ -590,9 +590,9 @@ class TelegramSignalListener:
             if not is_interactive:
                 logger.warning("Non-interactive environment detected. Checking for existing session...")
             
-            await self.client.start()
+            await self.client.connect()
             
-            # Check if password is needed
+            # Check if already authorized
             if not await self.client.is_user_authorized():
                 if not is_interactive:
                     logger.error("=" * 60)
@@ -604,7 +604,100 @@ class TelegramSignalListener:
                     logger.error("3. Enter your phone number and verification code")
                     logger.error("4. Session will be saved automatically")
                     logger.error("=" * 60)
-                raise SessionPasswordNeededError("2FA password required")
+                    raise SessionPasswordNeededError("Authentication required in interactive mode")
+                
+                # Interactive authentication with phone call support
+                from telethon.errors import PhoneCodeInvalidError, FloodWaitError
+                
+                logger.info("=" * 60)
+                logger.info("TELEGRAM AUTHENTICATION")
+                logger.info("=" * 60)
+                
+                phone = input("Enter your phone number (with country code, e.g., +1234567890): ").strip()
+                if not phone.startswith('+'):
+                    logger.warning("Phone number should start with + (country code)")
+                    phone = '+' + phone.lstrip('+')
+                
+                try:
+                    logger.info(f"Sending verification code to {phone}...")
+                    sent_code = await self.client.send_code_request(phone)
+                    logger.info("Code sent! Check your Telegram app.")
+                    logger.info("")
+                    logger.info("OPTIONS:")
+                    logger.info("1. Enter the code sent via SMS to your Telegram app")
+                    logger.info("2. Type 'call' to receive code via phone call instead")
+                    logger.info("3. Type 'resend' to request a new SMS code")
+                    logger.info("")
+                    
+                    max_attempts = 5
+                    for attempt in range(max_attempts):
+                        code_input = input(f"Enter verification code (attempt {attempt + 1}/{max_attempts}): ").strip()
+                        
+                        if code_input.lower() == 'call':
+                            logger.info("Requesting code via phone call...")
+                            try:
+                                sent_code = await self.client.send_code_request(phone, force_sms=False)
+                                logger.info("Phone call initiated! Answer the call to get your code.")
+                                code_input = input("Enter the code from the phone call: ").strip()
+                            except FloodWaitError as e:
+                                logger.error(f"Rate limited. Please wait {e.seconds} seconds ({e.seconds // 60} minutes).")
+                                continue
+                            except Exception as e:
+                                logger.error(f"Error requesting phone call: {e}")
+                                logger.info("Try entering the SMS code instead.")
+                                continue
+                        
+                        if code_input.lower() == 'resend':
+                            logger.info("Resending code...")
+                            try:
+                                sent_code = await self.client.send_code_request(phone)
+                                logger.info("New code sent!")
+                                continue
+                            except FloodWaitError as e:
+                                logger.error(f"Rate limited. Please wait {e.seconds} seconds.")
+                                continue
+                            except Exception as e:
+                                logger.error(f"Error resending code: {e}")
+                                continue
+                        
+                        if not code_input.isdigit():
+                            logger.error("Code must be numeric. Try again.")
+                            continue
+                        
+                        try:
+                            await self.client.sign_in(phone, code_input, phone_code_hash=sent_code.phone_code_hash)
+                            logger.info("Code accepted!")
+                            break
+                        except PhoneCodeInvalidError:
+                            logger.error(f"Invalid code. Please try again.")
+                            if attempt < max_attempts - 1:
+                                logger.info("You can type 'resend' to get a new code or 'call' for phone call.")
+                            continue
+                        except SessionPasswordNeededError:
+                            logger.info("Two-factor authentication is enabled.")
+                            password = input("Enter your 2FA password: ").strip()
+                            try:
+                                await self.client.sign_in(password=password)
+                                logger.info("2FA password accepted!")
+                                break
+                            except Exception as e:
+                                logger.error(f"2FA password error: {e}")
+                                raise
+                        except Exception as e:
+                            logger.error(f"Error: {e}")
+                            if attempt < max_attempts - 1:
+                                continue
+                            else:
+                                raise
+                    else:
+                        raise Exception("Maximum authentication attempts reached")
+                        
+                except FloodWaitError as e:
+                    logger.error(f"Rate limited by Telegram. Please wait {e.seconds} seconds ({e.seconds // 60} minutes).")
+                    raise
+                except Exception as e:
+                    logger.error(f"Authentication error: {e}")
+                    raise
             
             logger.info("Telegram client initialized successfully")
         except SessionPasswordNeededError:
