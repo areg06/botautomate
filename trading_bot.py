@@ -640,24 +640,66 @@ class TelegramSignalListener:
                                 logger.info("Phone call initiated! Answer the call to get your code.")
                                 code_input = input("Enter the code from the phone call: ").strip()
                             except FloodWaitError as e:
-                                logger.error(f"Rate limited. Please wait {e.seconds} seconds ({e.seconds // 60} minutes).")
-                                continue
+                                wait_minutes = e.seconds // 60
+                                logger.error("=" * 60)
+                                logger.error(f"⏰ RATE LIMITED")
+                                logger.error("=" * 60)
+                                logger.error(f"Telegram has rate limited your requests.")
+                                logger.error(f"Please wait {e.seconds} seconds ({wait_minutes} minutes) before trying again.")
+                                logger.error("")
+                                logger.error("You can:")
+                                logger.error("1. Wait and try again later")
+                                logger.error("2. Check your Telegram app - code might be there")
+                                logger.error("3. Check your phone's SMS messages")
+                                logger.error("=" * 60)
+                                raise
                             except Exception as e:
-                                logger.error(f"Error requesting phone call: {e}")
-                                logger.info("Try entering the SMS code instead.")
+                                error_msg = str(e)
+                                if "all available options" in error_msg.lower() or "ResendCodeRequest" in error_msg:
+                                    logger.error("=" * 60)
+                                    logger.error("⚠️  ALL VERIFICATION METHODS USED")
+                                    logger.error("=" * 60)
+                                    logger.error("You've already used all available verification methods:")
+                                    logger.error("- SMS code")
+                                    logger.error("- Phone call")
+                                    logger.error("")
+                                    logger.error("Options:")
+                                    logger.error("1. Check your Telegram app - code might be displayed there")
+                                    logger.error("2. Check your phone's SMS messages")
+                                    logger.error("3. Wait 5-10 minutes and try 'resend' for a new code")
+                                    logger.error("4. Enter the code you already received (if you have it)")
+                                    logger.error("=" * 60)
+                                    logger.info("Try entering the SMS code you received, or wait and use 'resend'.")
+                                else:
+                                    logger.error(f"Error requesting phone call: {e}")
+                                    logger.info("Try entering the SMS code instead.")
                                 continue
                         
                         if code_input.lower() == 'resend':
                             logger.info("Resending code...")
                             try:
                                 sent_code = await self.client.send_code_request(phone)
-                                logger.info("New code sent!")
+                                logger.info("✅ New code sent! Check your Telegram app or SMS.")
                                 continue
                             except FloodWaitError as e:
-                                logger.error(f"Rate limited. Please wait {e.seconds} seconds.")
+                                wait_minutes = e.seconds // 60
+                                logger.error("=" * 60)
+                                logger.error(f"⏰ RATE LIMITED")
+                                logger.error("=" * 60)
+                                logger.error(f"Cannot resend code yet. Please wait {e.seconds} seconds ({wait_minutes} minutes).")
+                                logger.error("")
+                                logger.error("In the meantime:")
+                                logger.error("- Check your Telegram app for the code")
+                                logger.error("- Check your phone's SMS messages")
+                                logger.error("=" * 60)
                                 continue
                             except Exception as e:
-                                logger.error(f"Error resending code: {e}")
+                                error_msg = str(e)
+                                if "all available options" in error_msg.lower():
+                                    logger.error("⚠️  All verification methods already used. Please wait 5-10 minutes.")
+                                    logger.info("Or try entering a code you already received.")
+                                else:
+                                    logger.error(f"Error resending code: {e}")
                                 continue
                         
                         if not code_input.isdigit():
