@@ -672,19 +672,50 @@ class TelegramSignalListener:
                         try:
                             user = await qr_login.wait(timeout=60)
                             logger.info(f"✅ QR code scanned and accepted!")
+                            
+                            # Check if 2FA is needed after QR scan
+                            if not await self.client.is_user_authorized():
+                                logger.info("🔐 Two-factor authentication is enabled.")
+                                password = input("Enter your 2FA password: ").strip()
+                                try:
+                                    await self.client.sign_in(password=password)
+                                    logger.info("✅ 2FA password accepted!")
+                                except Exception as e:
+                                    logger.error(f"2FA password error: {e}")
+                                    raise
+                            
                             logger.info(f"Logged in as: {user.first_name} {user.last_name or ''}")
                         except asyncio.TimeoutError:
                             logger.error("⏰ QR code login timed out. Please try again.")
                             raise Exception("QR login timeout")
                         except Exception as e:
-                            logger.error(f"QR login error: {e}")
-                            raise
+                            error_msg = str(e)
+                            if "password" in error_msg.lower() or "2FA" in error_msg or "two-step" in error_msg.lower():
+                                logger.warning("⚠️  QR code login requires 2FA password.")
+                                logger.info("Falling back to phone number authentication...")
+                                logger.info("")
+                                auth_method = "1"  # Fall back to phone auth
+                            else:
+                                logger.error(f"QR login error: {e}")
+                                raise
                             
                     except Exception as e:
-                        logger.error(f"QR code login failed: {e}")
-                        logger.info("Falling back to phone number authentication...")
-                        logger.info("")
-                        auth_method = "1"  # Fall back to phone auth
+                        error_msg = str(e)
+                        if "password" in error_msg.lower() or "2FA" in error_msg or "two-step" in error_msg.lower() or "two-steps" in error_msg.lower():
+                            logger.warning("=" * 60)
+                            logger.warning("⚠️  QR CODE LOGIN NOT AVAILABLE")
+                            logger.warning("=" * 60)
+                            logger.warning("Your account has 2FA enabled.")
+                            logger.warning("QR code login requires password first.")
+                            logger.warning("")
+                            logger.info("Falling back to phone number authentication...")
+                            logger.info("")
+                            auth_method = "1"  # Fall back to phone auth
+                        else:
+                            logger.error(f"QR code login failed: {e}")
+                            logger.info("Falling back to phone number authentication...")
+                            logger.info("")
+                            auth_method = "1"  # Fall back to phone auth
                 
                 if auth_method == "1":
                     # Phone number authentication
