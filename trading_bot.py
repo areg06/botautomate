@@ -606,14 +606,93 @@ class TelegramSignalListener:
                     logger.error("=" * 60)
                     raise SessionPasswordNeededError("Authentication required in interactive mode")
                 
-                # Interactive authentication with phone call support
+                # Interactive authentication with phone call and QR code support
                 from telethon.errors import PhoneCodeInvalidError, FloodWaitError
                 
                 logger.info("=" * 60)
                 logger.info("TELEGRAM AUTHENTICATION")
                 logger.info("=" * 60)
+                logger.info("Choose authentication method:")
+                logger.info("1. Phone number + SMS/Call code (traditional)")
+                logger.info("2. QR code (scan with your Telegram app)")
+                logger.info("")
                 
-                phone = input("Enter your phone number (with country code, e.g., +1234567890): ").strip()
+                auth_method = input("Enter method (1 or 2, default: 1): ").strip() or "1"
+                
+                if auth_method == "2":
+                    # QR Code login
+                    logger.info("")
+                    logger.info("=" * 60)
+                    logger.info("QR CODE LOGIN")
+                    logger.info("=" * 60)
+                    logger.info("Generating QR code...")
+                    
+                    try:
+                        qr_login = await self.client.qr_login()
+                        logger.info("")
+                        logger.info("✅ QR code generated!")
+                        logger.info("")
+                        logger.info("📱 INSTRUCTIONS:")
+                        logger.info("1. Open Telegram app on your phone")
+                        logger.info("2. Go to Settings → Devices → Link Desktop Device")
+                        logger.info("3. Scan the QR code below")
+                        logger.info("")
+                        logger.info("QR Code URL:")
+                        logger.info(qr_login.url)
+                        logger.info("")
+                        
+                        # Try to display QR code if qrcode library is available
+                        try:
+                            import qrcode
+                            qr = qrcode.QRCode()
+                            qr.add_data(qr_login.url)
+                            qr.make(fit=True)
+                            
+                            # Try to show QR code image
+                            try:
+                                img = qr.make_image()
+                                img.show()  # Opens image viewer
+                                logger.info("✅ QR code image opened!")
+                            except:
+                                # Fallback to ASCII
+                                logger.info("QR Code (ASCII):")
+                                qr.print_ascii(invert=True)
+                                logger.info("")
+                        except ImportError:
+                            logger.info("💡 Tip: Install 'qrcode' for visual QR code:")
+                            logger.info("   pip install qrcode[pil]")
+                            logger.info("")
+                        except Exception as e:
+                            logger.debug(f"Could not display QR code: {e}")
+                        
+                        logger.info("⏳ Waiting for you to scan the QR code...")
+                        logger.info("(This will timeout after 60 seconds)")
+                        logger.info("")
+                        
+                        try:
+                            user = await qr_login.wait(timeout=60)
+                            logger.info(f"✅ QR code scanned and accepted!")
+                            logger.info(f"Logged in as: {user.first_name} {user.last_name or ''}")
+                        except asyncio.TimeoutError:
+                            logger.error("⏰ QR code login timed out. Please try again.")
+                            raise Exception("QR login timeout")
+                        except Exception as e:
+                            logger.error(f"QR login error: {e}")
+                            raise
+                            
+                    except Exception as e:
+                        logger.error(f"QR code login failed: {e}")
+                        logger.info("Falling back to phone number authentication...")
+                        logger.info("")
+                        auth_method = "1"  # Fall back to phone auth
+                
+                if auth_method == "1":
+                    # Phone number authentication
+                    logger.info("=" * 60)
+                    logger.info("PHONE NUMBER AUTHENTICATION")
+                    logger.info("=" * 60)
+                    
+                    phone = input("Enter your phone number (with country code, e.g., +1234567890): ").strip()
                 if not phone.startswith('+'):
                     logger.warning("Phone number should start with + (country code)")
                     phone = '+' + phone.lstrip('+')
