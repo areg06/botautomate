@@ -149,7 +149,7 @@ class SignalParser:
 class BinanceFuturesTrader:
     """Handles trading operations on Binance Futures using CCXT."""
     
-    def __init__(self, api_key: str, api_secret: str, dry_run: bool = False):
+    def __init__(self, api_key: str, api_secret: str, dry_run: bool = False, notification_callback=None):
         """
         Initialize Binance Futures trader.
         
@@ -157,8 +157,11 @@ class BinanceFuturesTrader:
             api_key: Binance API key
             api_secret: Binance API secret
             dry_run: If True, only print actions without executing
+            notification_callback: Async function to send notifications (signal, message)
         """
         self.dry_run = dry_run
+        self.notification_callback = notification_callback
+        self.active_trades = {}  # Track active trades: {symbol: {entry_price, position_size, targets, tp_orders}}
         self.exchange = ccxt.binance({
             'apiKey': api_key,
             'secret': api_secret,
@@ -525,6 +528,20 @@ class BinanceFuturesTrader:
             logger.info(f"Successfully executed signal: Entry order {entry_order_id}, "
                        f"Stop loss {sl_order_id}, {len(tp_orders)} take profit orders placed")
             
+            # Store trade info for tracking
+            self.active_trades[signal.symbol] = {
+                'entry_price': signal.entry_price,
+                'position_size': position_size,
+                'direction': signal.direction,
+                'leverage': signal.leverage,
+                'targets': signal.targets,
+                'tp_orders': {
+                    1: {'order_id': tp1_order_id, 'price': signal.targets[0], 'size': tp1_size},
+                    2: {'order_id': tp2_order_id, 'price': signal.targets[1], 'size': tp2_size}
+                },
+                'entry_order_id': entry_order_id
+            }
+            
             return True
             
         except Exception as e:
@@ -536,7 +553,7 @@ class TelegramSignalListener:
     """Listens to Telegram channel for trading signals."""
     
     def __init__(self, api_id: int, api_hash: str, channel_id: int, 
-                 trader: BinanceFuturesTrader):
+                 trader: BinanceFuturesTrader, notification_chat_id: Optional[int] = None):
         """
         Initialize Telegram listener.
         
@@ -545,10 +562,12 @@ class TelegramSignalListener:
             api_hash: Telegram API hash
             channel_id: Channel ID to monitor
             trader: BinanceFuturesTrader instance
+            notification_chat_id: Chat ID to send notifications to (optional)
         """
         self.api_id = api_id
         self.api_hash = api_hash
         self.channel_id = channel_id
+        self.notification_chat_id = notification_chat_id
         self.trader = trader
         self.parser = SignalParser()
         self.client = None
@@ -914,6 +933,91 @@ class TelegramSignalListener:
                     logger.info("If this is first run, you need to authenticate interactively.")
             raise
     
+    async def send_notification(self, message: str):
+        """Send notification message to notification chat."""
+        if not self.notification_chat_id or not self.client:
+            return
+        
+        try:
+            await self.client.send_message(self.notification_chat_id, message)
+            logger.info(f"Notification sent to chat {self.notification_chat_id}")
+        except Exception as e:
+            logger.error(f"Failed to send notification: {e}")
+    
+    async def forward_signal(self, event):
+        """Forward signal message to notification chat."""
+        if not self.notification_chat_id or not self.client:
+            return
+        
+        try:
+            await self.client.forward_messages(
+                self.notification_chat_id,
+                event.message.id,
+                self.channel_id
+            )
+            logger.info(f"Signal forwarded to chat {self.notification_chat_id}")
+        except Exception as e:
+            logger.error(f"Failed to forward signal: {e}")
+    
+    async def check_order_status(self, symbol: str):
+        """Check if take profit orders were filled and send notifications."""
+        if not self.trader or not hasattr(self.trader, 'active_trades'):
+            return
+        
+        if symbol not in self.trader.active_trades:
+            return
+        
+        trade = self.trader.active_trades[symbol]
+        
+        try:
+            # Check each TP order
+            for tp_num, tp_info in trade['tp_orders'].items():
+                if not tp_info['order_id'] or tp_info['order_id'].startswith('dry_run'):
+                    continue
+                
+                # Skip if already notified (store in trade info)
+                if f'tp{tp_num}_notified' in trade:
+                    continue
+                
+                try:
+                    order = self.trader.exchange.fetch_order(tp_info['order_id'], symbol)
+                    if order['status'] == 'closed' or order['status'] == 'filled':
+                        # Calculate profit percentage
+                        entry_price = trade['entry_price']
+                        tp_price = tp_info['price']
+                        
+                        if trade['direction'] == "BUY":
+                            profit_pct = ((tp_price - entry_price) / entry_price) * 100 * trade['leverage']
+                        else:  # SELL
+                            profit_pct = ((entry_price - tp_price) / entry_price) * 100 * trade['leverage']
+                        
+                        # Send achievement notification
+                        symbol_name = symbol.replace('/USDT', '')
+                        message = f"💸 {symbol_name}\n✅ Target #{tp_num} Done\nCurrent profit: {profit_pct:.1f}%"
+                        await self.send_notification(message)
+                        
+                        # Mark as notified
+                        trade[f'tp{tp_num}_notified'] = True
+                        
+                        logger.info(f"Target #{tp_num} achieved for {symbol}: {profit_pct:.1f}% profit")
+                        
+                except Exception as e:
+                    logger.debug(f"Error checking order {tp_info['order_id']}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error checking order status: {e}")
+    
+    async def periodic_order_check(self):
+        """Periodically check order status for all active trades."""
+        while True:
+            try:
+                await asyncio.sleep(30)  # Check every 30 seconds
+                if self.trader and self.trader.active_trades:
+                    for symbol in list(self.trader.active_trades.keys()):
+                        await self.check_order_status(symbol)
+            except Exception as e:
+                logger.error(f"Error in periodic order check: {e}")
+    
     async def handle_message(self, event):
         """Handle incoming message from Telegram channel."""
         try:
@@ -926,6 +1030,10 @@ class TelegramSignalListener:
             logger.info(f"Received potential signal message from channel {self.channel_id}")
             logger.debug(f"Message content: {message_text[:200]}...")
             
+            # Forward signal to notification chat
+            if self.notification_chat_id:
+                await self.forward_signal(event)
+            
             # Parse signal
             signal = self.parser.parse_signal(message_text)
             
@@ -935,6 +1043,16 @@ class TelegramSignalListener:
                 
                 if success:
                     logger.info("Signal executed successfully")
+                    
+                    # Send signal notification
+                    if self.notification_chat_id:
+                        symbol_name = signal.symbol.replace('/USDT', '')
+                        direction_emoji = "🟢" if signal.direction == "BUY" else "🔴"
+                        message = f"{direction_emoji} {signal.direction} {symbol_name}\nEntry: {signal.entry_price}\nLeverage: {signal.leverage}X"
+                        await self.send_notification(message)
+                    
+                    # Check order status for achievements (will be checked periodically)
+                    # The periodic_order_check task will handle this
                 else:
                     logger.error("Failed to execute signal")
             else:
@@ -950,6 +1068,11 @@ class TelegramSignalListener:
         @self.client.on(events.NewMessage(chats=self.channel_id))
         async def new_message_handler(event):
             await self.handle_message(event)
+        
+        # Start periodic order checking for achievements
+        if self.notification_chat_id:
+            asyncio.create_task(self.periodic_order_check())
+            logger.info("Order status monitoring started for achievement notifications")
         
         logger.info(f"Started listening to channel {self.channel_id}")
         logger.info("Bot is running. Press Ctrl+C to stop.")
@@ -1012,7 +1135,17 @@ async def main():
         logger.error("TELEGRAM_CHANNEL_ID must be a valid integer")
         return
     
-    # Initialize trader
+    # Get notification chat ID (optional)
+    notification_chat_id = os.getenv('TELEGRAM_NOTIFICATION_CHAT_ID')
+    notification_chat_id_int = None
+    if notification_chat_id:
+        try:
+            notification_chat_id_int = int(notification_chat_id)
+            logger.info(f"Notifications will be sent to chat: {notification_chat_id_int}")
+        except ValueError:
+            logger.warning(f"Invalid TELEGRAM_NOTIFICATION_CHAT_ID: {notification_chat_id}")
+    
+    # Initialize trader first
     trader = BinanceFuturesTrader(api_key, api_secret, dry_run=dry_run)
     
     # Initialize Telegram listener
@@ -1020,7 +1153,8 @@ async def main():
         api_id=int(telegram_api_id),
         api_hash=telegram_api_hash,
         channel_id=channel_id_int,
-        trader=trader
+        trader=trader,
+        notification_chat_id=notification_chat_id_int
     )
     
     # Start listening
