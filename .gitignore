@@ -30,9 +30,16 @@ wheels/
 .vscode/
 .idea/
 *.swp
-*.swo
+*.swoz
 *~
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Telegram session files
+*.session
+*.session-journal
+
+# Journal files
+*.journal
