@@ -1122,7 +1122,7 @@ def start_web_server():
             spec = importlib.util.spec_from_file_location("web_server", web_server_path)
             web_server = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(web_server)
-            port = int(os.getenv('PORT', 8000))
+            port = int(os.getenv('PORT', 8080))
             web_server.start_web_server(port)
         else:
             logger.warning("web_server.py not found, skipping web server")

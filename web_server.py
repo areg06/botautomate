@@ -227,7 +227,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         pass
 
 
-def start_web_server(port=8000):
+def start_web_server(port=8080):
     """Start the web server on the specified port."""
     server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
     print(f"Web server started on port {port}")
@@ -235,5 +235,5 @@ def start_web_server(port=8000):
 
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 8000))
+    port = int(os.getenv('PORT', 8080))
     start_web_server(port)
