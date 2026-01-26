@@ -133,7 +133,7 @@ class SignalParser:
                 symbol=symbol,
                 leverage=leverage,
                 entry_price=entry_price,
-                targets=targets[:2]  # Only take first 2 targets (60% and 40%)
+                targets=targets[:1]  # Only take first target (100% of position)
             )
             
             logger.info(f"Parsed signal: {signal.direction} {signal.symbol} @ {signal.entry_price} "
@@ -509,40 +509,27 @@ class BinanceFuturesTrader:
             if not sl_order_id:
                 logger.warning("Failed to place stop loss order")
             
-            # Step 6: Place take profit orders
-            # Close 60% of position at first TP price, 40% at second TP price
-            if len(signal.targets) < 2:
-                logger.warning(f"Signal has only {len(signal.targets)} target(s), need at least 2")
+            # Step 6: Place take profit order
+            # Close 100% of position at first TP price
+            if len(signal.targets) < 1:
+                logger.warning(f"Signal has no targets")
                 return False
             
-            # Calculate sizes: 60% of position for first TP, 40% for second TP
-            tp1_size = position_size * 0.60
-            tp1_size = float(Decimal(str(tp1_size)).quantize(Decimal('0.001'), rounding=ROUND_DOWN))
-            
-            tp2_size = position_size * 0.40
-            tp2_size = float(Decimal(str(tp2_size)).quantize(Decimal('0.001'), rounding=ROUND_DOWN))
+            # Use 100% of position for first TP
+            tp_size = position_size  # 100% of position
+            tp_size = float(Decimal(str(tp_size)).quantize(Decimal('0.001'), rounding=ROUND_DOWN))
             
             tp_orders = []
             
-            # Place first take profit: Close 60% of position at first target price from signal
-            logger.info(f"TP1: Closing {tp1_size} ({60:.0f}% of {position_size}) at price {signal.targets[0]}")
-            tp1_order_id = self.place_take_profit_order(
-                signal, signal.targets[0], tp1_size, 1
+            # Place take profit: Close 100% of position at first target price from signal
+            logger.info(f"TP: Closing {tp_size} (100% of {position_size}) at price {signal.targets[0]}")
+            tp_order_id = self.place_take_profit_order(
+                signal, signal.targets[0], tp_size, 1
             )
-            if tp1_order_id:
-                tp_orders.append(tp1_order_id)
+            if tp_order_id:
+                tp_orders.append(tp_order_id)
             else:
-                logger.warning("Failed to place take profit order 1")
-            
-            # Place second take profit: Close 40% of position at second target price from signal
-            logger.info(f"TP2: Closing {tp2_size} ({40:.0f}% of {position_size}) at price {signal.targets[1]}")
-            tp2_order_id = self.place_take_profit_order(
-                signal, signal.targets[1], tp2_size, 2
-            )
-            if tp2_order_id:
-                tp_orders.append(tp2_order_id)
-            else:
-                logger.warning("Failed to place take profit order 2")
+                logger.warning("Failed to place take profit order")
             
             logger.info(f"Successfully executed signal: Entry order {entry_order_id}, "
                        f"Stop loss {sl_order_id}, {len(tp_orders)} take profit orders placed")
@@ -555,8 +542,7 @@ class BinanceFuturesTrader:
                 'leverage': signal.leverage,
                 'targets': signal.targets,
                 'tp_orders': {
-                    1: {'order_id': tp1_order_id, 'price': signal.targets[0], 'size': tp1_size},
-                    2: {'order_id': tp2_order_id, 'price': signal.targets[1], 'size': tp2_size}
+                    1: {'order_id': tp_order_id, 'price': signal.targets[0], 'size': tp_size}
                 },
                 'entry_order_id': entry_order_id
             }
