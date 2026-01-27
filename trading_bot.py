@@ -136,8 +136,14 @@ class SignalParser:
                 targets=targets[:1]  # Only take first target (100% of position)
             )
             
-            logger.info(f"Parsed signal: {signal.direction} {signal.symbol} @ {signal.entry_price} "
-                       f"with {signal.leverage}X leverage, {len(signal.targets)} targets")
+            logger.info(
+                "[SIGNAL] Parsed\n"
+                f"  Direction : {signal.direction}\n"
+                f"  Symbol    : {signal.symbol}\n"
+                f"  Entry     : {signal.entry_price} USDT\n"
+                f"  Leverage  : {signal.leverage}x\n"
+                f"  Targets   : {', '.join(map(str, signal.targets))}"
+            )
             
             return signal
             
@@ -472,7 +478,13 @@ class BinanceFuturesTrader:
             True if successful, False otherwise
         """
         try:
-            logger.info(f"Executing signal: {signal.direction} {signal.symbol}")
+            logger.info(
+                "[TRADE] Starting execution\n"
+                f"  Direction : {signal.direction}\n"
+                f"  Symbol    : {signal.symbol}\n"
+                f"  Entry     : {signal.entry_price} USDT\n"
+                f"  Leverage  : {signal.leverage}x"
+            )
             
             # Step 1: Set leverage
             if not self.set_leverage(signal.symbol, int(signal.leverage)):
@@ -494,7 +506,11 @@ class BinanceFuturesTrader:
                 logger.error("Invalid position size calculated")
                 return False
             
-            logger.info(f"Calculated position size: {position_size} {signal.symbol.split('/')[0]}")
+            logger.info(
+                "[TRADE] Position size\n"
+                f"  Size      : {position_size} {signal.symbol.split('/')[0]}\n"
+                f"  Balance   : {balance:.4f} USDT (15% used)"
+            )
             
             # Step 4: Place market order for entry
             entry_order_id = self.place_market_order(signal, position_size)
@@ -522,7 +538,11 @@ class BinanceFuturesTrader:
             tp_orders = []
             
             # Place take profit: Close 100% of position at first target price from signal
-            logger.info(f"TP: Closing {tp_size} (100% of {position_size}) at price {signal.targets[0]}")
+            logger.info(
+                "[TP] Take profit\n"
+                f"  Close     : {tp_size} {signal.symbol.split('/')[0]} (100% position)\n"
+                f"  TP Price  : {signal.targets[0]} USDT"
+            )
             tp_order_id = self.place_take_profit_order(
                 signal, signal.targets[0], tp_size, 1
             )
