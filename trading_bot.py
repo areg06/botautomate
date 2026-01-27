@@ -944,19 +944,36 @@ class TelegramSignalListener:
             return
         
         try:
-            # Get entity first to ensure it's resolved
+            # Try to get entity - this will work if user has messaged the bot or is in contacts
             try:
                 entity = await self.client.get_entity(self.notification_chat_id)
-            except Exception:
-                # If get_entity fails, try with InputPeerUser
-                from telethon.tl.types import InputPeerUser
-                entity = InputPeerUser(self.notification_chat_id, 0)  # access_hash=0, will be resolved
+            except ValueError:
+                # Entity not found - user needs to message the bot first
+                logger.warning(f"Could not resolve user {self.notification_chat_id}. "
+                             f"User needs to send a message to the bot first for notifications to work.")
+                return
+            except Exception as e:
+                logger.debug(f"Error getting entity: {e}")
+                # Try using the chat ID directly (might work for some cases)
+                try:
+                    await self.client.send_message(self.notification_chat_id, message)
+                    logger.info(f"Notification sent to chat {self.notification_chat_id}")
+                    return
+                except Exception as e2:
+                    logger.warning(f"Could not send notification: {e2}. "
+                                 f"Please send a message to the bot first to enable notifications.")
+                    return
             
             await self.client.send_message(entity, message)
             logger.info(f"Notification sent to chat {self.notification_chat_id}")
         except Exception as e:
-            logger.error(f"Failed to send notification: {e}")
-            logger.debug(f"Error details: {type(e).__name__}: {e}")
+            error_msg = str(e)
+            if "invalid Peer" in error_msg or "Peer" in error_msg:
+                logger.warning(f"Notification failed: User entity not resolved. "
+                             f"Please send a message to the bot account first to enable notifications.")
+            else:
+                logger.error(f"Failed to send notification: {e}")
+                logger.debug(f"Error details: {type(e).__name__}: {e}")
     
     async def forward_signal(self, event):
         """Forward signal message to notification chat."""
@@ -964,13 +981,27 @@ class TelegramSignalListener:
             return
         
         try:
-            # Get entity first to ensure it's resolved
+            # Try to get entity - this will work if user has messaged the bot or is in contacts
             try:
                 entity = await self.client.get_entity(self.notification_chat_id)
-            except Exception:
-                # If get_entity fails, try with InputPeerUser
-                from telethon.tl.types import InputPeerUser
-                entity = InputPeerUser(self.notification_chat_id, 0)  # access_hash=0, will be resolved
+            except ValueError:
+                # Entity not found - user needs to message the bot first
+                logger.debug(f"Could not resolve user {self.notification_chat_id} for forwarding. "
+                           f"User needs to send a message to the bot first.")
+                return
+            except Exception as e:
+                logger.debug(f"Error getting entity for forwarding: {e}")
+                # Try using the chat ID directly
+                try:
+                    await self.client.forward_messages(
+                        self.notification_chat_id,
+                        event.message.id,
+                        self.channel_id
+                    )
+                    logger.info(f"Signal forwarded to chat {self.notification_chat_id}")
+                    return
+                except Exception:
+                    return
             
             await self.client.forward_messages(
                 entity,
@@ -979,8 +1010,12 @@ class TelegramSignalListener:
             )
             logger.info(f"Signal forwarded to chat {self.notification_chat_id}")
         except Exception as e:
-            logger.error(f"Failed to forward signal: {e}")
-            logger.debug(f"Error details: {type(e).__name__}: {e}")
+            error_msg = str(e)
+            if "invalid Peer" in error_msg or "Peer" in error_msg:
+                logger.debug(f"Forward failed: User entity not resolved. "
+                           f"User needs to send a message to the bot first.")
+            else:
+                logger.debug(f"Failed to forward signal: {e}")
     
     async def check_order_status(self, symbol: str):
         """Check if take profit orders were filled and send notifications."""
