@@ -30,6 +30,35 @@ if not os.getenv('BINANCE_API_KEY'):
 # Import shared log storage
 from log_storage import log_storage
 
+# Optional dashboard state integration (FastAPI dashboard)
+try:
+    from dashboard_state import (
+        update_status,
+        record_signal,
+        record_trade,
+        record_tp,
+        record_error,
+        append_log,
+    )
+except Exception:  # pragma: no cover - dashboard is optional
+    def update_status(*args, **kwargs):
+        pass
+
+    def record_signal(*args, **kwargs):
+        pass
+
+    def record_trade(*args, **kwargs):
+        pass
+
+    def record_tp(*args, **kwargs):
+        pass
+
+    def record_error(*args, **kwargs):
+        pass
+
+    def append_log(*args, **kwargs):
+        pass
+
 # Custom log handler to store logs in memory for web display
 class WebLogHandler(logging.Handler):
     """Log handler that stores logs in memory for web display."""
@@ -136,6 +165,14 @@ class SignalParser:
                 targets=targets[:1]  # Only take first target (100% of position)
             )
             
+            # Dashboard: record parsed signal
+            record_signal(symbol, direction)
+            append_log(
+                "INFO",
+                "SIGNAL",
+                f"{direction} {symbol} entry {entry_price} targets {signal.targets}",
+            )
+
             logger.info(
                 "[SIGNAL] Parsed\n"
                 f"  Direction : {signal.direction}\n"
@@ -485,6 +522,12 @@ class BinanceFuturesTrader:
                 f"  Entry     : {signal.entry_price} USDT\n"
                 f"  Leverage  : {signal.leverage}x"
             )
+
+            append_log(
+                "INFO",
+                "TRADE",
+                f"Start {signal.direction} {signal.symbol} entry {signal.entry_price}x{signal.leverage}",
+            )
             
             # Step 1: Set leverage
             if not self.set_leverage(signal.symbol, int(signal.leverage)):
@@ -510,6 +553,11 @@ class BinanceFuturesTrader:
                 "[TRADE] Position size\n"
                 f"  Size      : {position_size} {signal.symbol.split('/')[0]}\n"
                 f"  Balance   : {balance:.4f} USDT (15% used)"
+            )
+            append_log(
+                "INFO",
+                "TRADE",
+                f"Size {position_size} {signal.symbol} with balance {balance:.4f} USDT",
             )
             
             # Step 4: Place market order for entry
@@ -551,8 +599,23 @@ class BinanceFuturesTrader:
             else:
                 logger.warning("Failed to place take profit order")
             
-            logger.info(f"Successfully executed signal: Entry order {entry_order_id}, "
-                       f"Stop loss {sl_order_id}, {len(tp_orders)} take profit orders placed")
+            logger.info(
+                f"Successfully executed signal: Entry order {entry_order_id}, "
+                f"Stop loss {sl_order_id}, {len(tp_orders)} take profit orders placed"
+            )
+
+            # Dashboard: record trade
+            record_trade(
+                symbol=signal.symbol,
+                direction=signal.direction,
+                entry_price=signal.entry_price,
+                qty=position_size,
+            )
+            append_log(
+                "INFO",
+                "TRADE",
+                f"Executed {signal.direction} {signal.symbol} size {position_size} TP {signal.targets[0]} SL {sl_order_id}",
+            )
             
             # Store trade info for tracking
             self.active_trades[signal.symbol] = {
@@ -1069,6 +1132,14 @@ class TelegramSignalListener:
                         else:  # SELL
                             profit_pct = ((entry_price - tp_price) / entry_price) * 100 * trade['leverage']
                         
+                        # Dashboard: record TP
+                        record_tp(symbol, profit_pct)
+                        append_log(
+                            "INFO",
+                            "TP",
+                            f"{symbol} Target #{tp_num} hit, ROI {profit_pct:.1f}%",
+                        )
+
                         # Send achievement notification
                         symbol_name = symbol.replace('/USDT', '')
                         message = f"💸 {symbol_name}\n✅ Target #{tp_num} Done\nCurrent profit: {profit_pct:.1f}%"
@@ -1084,6 +1155,8 @@ class TelegramSignalListener:
                     
         except Exception as e:
             logger.error(f"Error checking order status: {e}")
+            record_error(str(e))
+            append_log("ERROR", "CHECK_STATUS", str(e))
     
     async def periodic_order_check(self):
         """Periodically check order status for all active trades."""
@@ -1187,7 +1260,7 @@ def start_web_server():
 
 async def main():
     """Main entry point."""
-    # Start web server in background thread
+    # Start legacy web server (simple HTML) in background thread
     web_thread = threading.Thread(target=start_web_server, daemon=True)
     web_thread.start()
     logger.info("Web server started on background thread")
@@ -1212,6 +1285,9 @@ async def main():
     except ValueError:
         logger.error("TELEGRAM_CHANNEL_ID must be a valid integer")
         return
+    
+    # Dashboard: update status
+    update_status("DRY RUN" if dry_run else "LIVE", channel_id)
     
     # Get notification chat ID (optional)
     notification_chat_id = os.getenv('TELEGRAM_NOTIFICATION_CHAT_ID')
