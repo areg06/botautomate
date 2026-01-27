@@ -83,7 +83,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "dashboard_server:app",
         host="0.0.0.0",
-        port=int(os.getenv("DASHBOARD_PORT", "8080")),
+        port=int(os.getenv("DASHBOARD_PORT", "4000")),
         reload=False,
     )
 
