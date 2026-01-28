@@ -364,7 +364,9 @@ class BinanceFuturesTrader:
     def place_stop_loss_order(self, signal: TradingSignal, entry_price: float, 
                               position_size: float, leverage: float) -> Optional[str]:
         """
-        Place a stop loss order at -170% ROI.
+        Place a stop loss order at -170% ROI as a TRUE conditional order.
+        We ONLY use Binance STOP_MARKET. If the exchange rejects it (e.g. Algo API required),
+        we log the error and continue WITHOUT placing any basic/limit fallback.
         
         Args:
             signal: Trading signal
@@ -388,7 +390,7 @@ class BinanceFuturesTrader:
                 # For SHORT: SL above entry
                 sl_price = entry_price * (1 + 1.70 / leverage)
             
-            # For stop loss, we need to close the position
+            # For stop loss, we need to close the position:
             # If we bought (long), we sell to stop loss
             # If we sold (short), we buy to stop loss
             side = 'sell' if signal.direction == "BUY" else 'buy'
@@ -398,11 +400,9 @@ class BinanceFuturesTrader:
                           f"{side} {position_size} {signal.symbol} @ {sl_price:.6f} (-170% ROI)")
                 return "dry_run_sl"
             
-            logger.info(f"Placing stop loss: {side} {position_size} {signal.symbol} @ {sl_price:.6f}...")
-            # Binance Futures requires using Algo Order API for stop loss
-            # Use STOP_MARKET via create_order with proper params
+            logger.info(f"Placing conditional stop loss (STOP_MARKET): {side} {position_size} {signal.symbol} @ {sl_price:.6f}...")
+            # Try a TRUE conditional STOP_MARKET order. No basic/limit fallbacks (Option A).
             try:
-                # Method 1: Try STOP_MARKET with reduceOnly
                 order = self.exchange.create_order(
                     symbol=signal.symbol,
                     type='STOP_MARKET',
@@ -415,47 +415,24 @@ class BinanceFuturesTrader:
                     }
                 )
             except Exception as e:
-                # Fallback: Try using STOP with limit price
-                logger.warning(f"Stop market order failed, trying STOP limit: {e}")
-                try:
-                    # Calculate a limit price slightly worse than stop price
-                    if side == 'sell':
-                        limit_price = sl_price * 0.995  # 0.5% below stop for sell
-                    else:
-                        limit_price = sl_price * 1.005  # 0.5% above stop for buy
-                    
-                    order = self.exchange.create_order(
-                        symbol=signal.symbol,
-                        type='STOP',
-                        side=side,
-                        amount=position_size,
-                        price=limit_price,
-                        params={
-                            'stopPrice': sl_price,
-                            'reduceOnly': True,
-                            'workingType': 'MARK_PRICE'
-                        }
-                    )
-                except Exception as e2:
-                    # Last resort: Use TAKE_PROFIT_MARKET in reverse (not ideal but works)
-                    logger.warning(f"STOP order failed, trying alternative method: {e2}")
-                    try:
-                        # Use limit order as stop loss (less ideal but functional)
-                        order = self.exchange.create_limit_order(
-                            symbol=signal.symbol,
-                            side=side,
-                            amount=position_size,
-                            price=sl_price
-                        )
-                        logger.warning("Using limit order as stop loss (less reliable than stop market)")
-                    except Exception as e3:
-                        logger.error(f"All stop loss methods failed: {e3}")
-                        logger.warning("Continuing without stop loss - monitor position manually!")
-                        return None
+                logger.error(f"Failed to place conditional stop loss (STOP_MARKET) for {signal.symbol}: {e}")
+                record_error(f"Stop loss failed for {signal.symbol}: {e}")
+                append_log(
+                    "ERROR",
+                    "SL",
+                    f"Conditional SL failed for {signal.symbol} @ {sl_price:.6f}: {e}",
+                )
+                logger.warning("Continuing WITHOUT stop loss - monitor this position manually on Binance.")
+                return None
             
             order_id = order.get('id')
             logger.info(f"✅ Successfully placed stop loss: {order_id} "
                        f"for {position_size} {signal.symbol} @ {sl_price:.6f} (-170% ROI)")
+            append_log(
+                "INFO",
+                "SL",
+                f"Placed conditional SL for {signal.symbol} @ {sl_price:.6f} (-170% ROI)",
+            )
             return order_id
             
         except Exception as e:
@@ -465,7 +442,10 @@ class BinanceFuturesTrader:
     def place_take_profit_order(self, signal: TradingSignal, target_price: float, 
                                 position_size: float, order_num: int) -> Optional[str]:
         """
-        Place a take profit limit order.
+        Place a take profit order as a TRUE conditional order.
+        We ONLY use Binance TAKE_PROFIT_MARKET. If the exchange rejects it
+        (e.g. Algo API required), we log the error and skip without placing
+        any basic/limit fallback.
         
         Args:
             signal: Trading signal
@@ -487,17 +467,37 @@ class BinanceFuturesTrader:
                           f"{side} {position_size} {signal.symbol} @ {target_price}")
                 return f"dry_run_tp_{order_num}"
             
-            logger.info(f"Placing take profit {order_num}: {side} {position_size} {signal.symbol} @ {target_price}...")
-            order = self.exchange.create_limit_order(
-                symbol=signal.symbol,
-                side=side,
-                amount=position_size,
-                price=target_price
-            )
+            logger.info(f"Placing conditional take profit {order_num} (TAKE_PROFIT_MARKET): {side} {position_size} {signal.symbol} @ {target_price}...")
+            try:
+                order = self.exchange.create_order(
+                    symbol=signal.symbol,
+                    type='TAKE_PROFIT_MARKET',
+                    side=side,
+                    amount=position_size,
+                    params={
+                        'stopPrice': target_price,
+                        'reduceOnly': True,
+                        'workingType': 'MARK_PRICE',  # Use mark price for trigger
+                    },
+                )
+            except Exception as e:
+                logger.error(f"Failed to place conditional take profit {order_num} for {signal.symbol}: {e}")
+                record_error(f"Take profit {order_num} failed for {signal.symbol}: {e}")
+                append_log(
+                    "ERROR",
+                    "TP",
+                    f"Conditional TP{order_num} failed for {signal.symbol} @ {target_price}: {e}",
+                )
+                return None
             
             order_id = order.get('id')
             logger.info(f"✅ Successfully placed take profit {order_num}: {order_id} "
                        f"for {position_size} {signal.symbol} @ {target_price}")
+            append_log(
+                "INFO",
+                "TP",
+                f"Placed conditional TP{order_num} for {signal.symbol} @ {target_price}",
+            )
             return order_id
             
         except Exception as e:
