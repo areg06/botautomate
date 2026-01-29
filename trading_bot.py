@@ -361,6 +361,90 @@ class BinanceFuturesTrader:
             logger.error(f"Error placing market order: {e}")
             return None
     
+    def _place_algo_conditional_order(self, symbol: str, side: str, order_type: str,
+                                       quantity: float, trigger_price: float) -> Optional[str]:
+        """
+        Place a conditional (STOP_MARKET or TAKE_PROFIT_MARKET) order via Binance Algo Order API.
+        Used when the standard order endpoint returns -4120 (use Algo Order API instead).
+        Returns algoId as order id, or None on failure.
+        """
+        try:
+            self.exchange.load_markets()
+            market = self.exchange.market(symbol)
+            symbol_id = market['id']  # e.g. LTCUSDT
+            amount_str = self.exchange.amount_to_precision(symbol, quantity)
+            trigger_str = self.exchange.price_to_precision(symbol, trigger_price)
+            side_upper = side.upper()
+            params = {
+                'algoType': 'CONDITIONAL',
+                'symbol': symbol_id,
+                'side': side_upper,
+                'type': order_type,
+                'quantity': amount_str,
+                'triggerPrice': trigger_str,
+                'workingType': 'MARK_PRICE',
+                'reduceOnly': 'true',
+            }
+            resp = self.exchange.request('algoOrder', 'fapiPrivate', 'post', params)
+            algo_id = resp.get('algoId')
+            if algo_id is not None:
+                return str(algo_id)
+            return None
+        except Exception as e:
+            logger.error(f"Algo Order API failed for {symbol} {order_type}: {e}")
+            return None
+    
+    def _cancel_conditional_order(self, symbol: str, order_id: Optional[str]) -> bool:
+        """
+        Cancel a conditional order (regular or algo). Tries standard cancel first,
+        then Algo Order cancel endpoint if needed. Returns True if canceled (or already gone).
+        """
+        if not order_id or order_id.startswith('dry_run'):
+            return True
+        try:
+            self.exchange.cancel_order(order_id, symbol)
+            logger.info(f"Canceled conditional order {order_id} for {symbol}")
+            return True
+        except Exception as e:
+            err = str(e)
+            if '-2011' in err or '-4120' in err or 'algo' in err.lower() or 'Unknown order' in err:
+                try:
+                    params = {'algoId': int(order_id) if isinstance(order_id, str) and order_id.isdigit() else order_id}
+                    self.exchange.request('algoOrder', 'fapiPrivate', 'delete', params)
+                    logger.info(f"Canceled algo order {order_id} for {symbol}")
+                    return True
+                except Exception as e2:
+                    logger.debug(f"Cancel algo order failed for {order_id}: {e2}")
+                    return False
+            logger.debug(f"Cancel order failed for {order_id}: {e}")
+            return False
+    
+    def _get_conditional_order_status(self, symbol: str, order_id: Optional[str]) -> Optional[str]:
+        """
+        Get status of a conditional order (regular or algo). Returns 'open', 'closed', or None.
+        """
+        if not order_id or order_id.startswith('dry_run'):
+            return None
+        try:
+            order = self.exchange.fetch_order(order_id, symbol)
+            s = (order.get('status') or '').lower()
+            if s in ('closed', 'filled', 'canceled', 'cancelled', 'rejected'):
+                return 'closed'
+            return 'open'
+        except Exception as e:
+            err = str(e)
+            if '-2011' in err or 'Unknown order' in err or 'not found' in err.lower():
+                try:
+                    params = {'algoId': int(order_id) if isinstance(order_id, str) and order_id.isdigit() else order_id}
+                    resp = self.exchange.request('algoOrder', 'fapiPrivate', 'get', params)
+                    algo_status = (resp.get('algoStatus') or resp.get('orderStatus') or '').upper()
+                    if algo_status in ('FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED'):
+                        return 'closed'
+                    return 'open'
+                except Exception:
+                    return None
+            return None
+    
     def place_stop_loss_order(self, signal: TradingSignal, entry_price: float, 
                               position_size: float, leverage: float) -> Optional[str]:
         """
@@ -401,7 +485,7 @@ class BinanceFuturesTrader:
                 return "dry_run_sl"
             
             logger.info(f"Placing conditional stop loss (STOP_MARKET): {side} {position_size} {signal.symbol} @ {sl_price:.6f}...")
-            # Try a TRUE conditional STOP_MARKET order. No basic/limit fallbacks (Option A).
+            order_id = None
             try:
                 order = self.exchange.create_order(
                     symbol=signal.symbol,
@@ -414,18 +498,26 @@ class BinanceFuturesTrader:
                         'workingType': 'MARK_PRICE'  # Use mark price for stop loss
                     }
                 )
+                order_id = order.get('id')
             except Exception as e:
-                logger.error(f"Failed to place conditional stop loss (STOP_MARKET) for {signal.symbol}: {e}")
-                record_error(f"Stop loss failed for {signal.symbol}: {e}")
-                append_log(
-                    "ERROR",
-                    "SL",
-                    f"Conditional SL failed for {signal.symbol} @ {sl_price:.6f}: {e}",
-                )
-                logger.warning("Continuing WITHOUT stop loss - monitor this position manually on Binance.")
-                return None
+                if '-4120' in str(e) or 'Algo Order API' in str(e):
+                    logger.info(f"Standard endpoint returned -4120, using Binance Algo Order API for SL...")
+                    order_id = self._place_algo_conditional_order(
+                        signal.symbol, side, 'STOP_MARKET', position_size, sl_price
+                    )
+                if not order_id:
+                    logger.error(f"Failed to place conditional stop loss for {signal.symbol}: {e}")
+                    record_error(f"Stop loss failed for {signal.symbol}: {e}")
+                    append_log(
+                        "ERROR",
+                        "SL",
+                        f"Conditional SL failed for {signal.symbol} @ {sl_price:.6f}: {e}",
+                    )
+                    logger.warning("Continuing WITHOUT stop loss - monitor this position manually on Binance.")
+                    return None
             
-            order_id = order.get('id')
+            if not order_id:
+                return None
             logger.info(f"✅ Successfully placed stop loss: {order_id} "
                        f"for {position_size} {signal.symbol} @ {sl_price:.6f} (-170% ROI)")
             append_log(
@@ -468,6 +560,7 @@ class BinanceFuturesTrader:
                 return f"dry_run_tp_{order_num}"
             
             logger.info(f"Placing conditional take profit {order_num} (TAKE_PROFIT_MARKET): {side} {position_size} {signal.symbol} @ {target_price}...")
+            order_id = None
             try:
                 order = self.exchange.create_order(
                     symbol=signal.symbol,
@@ -480,17 +573,25 @@ class BinanceFuturesTrader:
                         'workingType': 'MARK_PRICE',  # Use mark price for trigger
                     },
                 )
+                order_id = order.get('id')
             except Exception as e:
-                logger.error(f"Failed to place conditional take profit {order_num} for {signal.symbol}: {e}")
-                record_error(f"Take profit {order_num} failed for {signal.symbol}: {e}")
-                append_log(
-                    "ERROR",
-                    "TP",
-                    f"Conditional TP{order_num} failed for {signal.symbol} @ {target_price}: {e}",
-                )
-                return None
+                if '-4120' in str(e) or 'Algo Order API' in str(e):
+                    logger.info(f"Standard endpoint returned -4120, using Binance Algo Order API for TP...")
+                    order_id = self._place_algo_conditional_order(
+                        signal.symbol, side, 'TAKE_PROFIT_MARKET', position_size, target_price
+                    )
+                if not order_id:
+                    logger.error(f"Failed to place conditional take profit {order_num} for {signal.symbol}: {e}")
+                    record_error(f"Take profit {order_num} failed for {signal.symbol}: {e}")
+                    append_log(
+                        "ERROR",
+                        "TP",
+                        f"Conditional TP{order_num} failed for {signal.symbol} @ {target_price}: {e}",
+                    )
+                    return None
             
-            order_id = order.get('id')
+            if not order_id:
+                return None
             logger.info(f"✅ Successfully placed take profit {order_num}: {order_id} "
                        f"for {position_size} {signal.symbol} @ {target_price}")
             append_log(
@@ -617,7 +718,7 @@ class BinanceFuturesTrader:
                 f"Executed {signal.direction} {signal.symbol} size {position_size} TP {signal.targets[0]} SL {sl_order_id}",
             )
             
-            # Store trade info for tracking
+            # Store trade info for tracking (conditional TP/SL: cancel counterpart when one fills)
             self.active_trades[signal.symbol] = {
                 'entry_price': signal.entry_price,
                 'position_size': position_size,
@@ -627,7 +728,8 @@ class BinanceFuturesTrader:
                 'tp_orders': {
                     1: {'order_id': tp_order_id, 'price': signal.targets[0], 'size': tp_size}
                 },
-                'entry_order_id': entry_order_id
+                'sl_order_id': sl_order_id,
+                'entry_order_id': entry_order_id,
             }
             
             return True
@@ -1101,7 +1203,11 @@ class TelegramSignalListener:
                 logger.debug(f"Failed to forward signal: {e}")
     
     async def check_order_status(self, symbol: str):
-        """Check if take profit orders were filled and send notifications."""
+        """
+        Check if take profit or stop loss orders were filled; send notifications and
+        cancel orphan conditional orders (when TP hits cancel SL; when SL hits cancel TP;
+        when position is closed cancel all).
+        """
         if not self.trader or not hasattr(self.trader, 'active_trades'):
             return
         
@@ -1111,47 +1217,72 @@ class TelegramSignalListener:
         trade = self.trader.active_trades[symbol]
         
         try:
-            # Check each TP order
+            # 1) Check each TP order (works for both regular and algo conditional orders)
             for tp_num, tp_info in trade['tp_orders'].items():
                 if not tp_info['order_id'] or tp_info['order_id'].startswith('dry_run'):
                     continue
                 
-                # Skip if already notified (store in trade info)
                 if f'tp{tp_num}_notified' in trade:
                     continue
                 
+                status = self.trader._get_conditional_order_status(symbol, tp_info['order_id'])
+                if status == 'closed':
+                    # TP filled: calculate profit, notify, cancel SL (orphan), remove from active_trades
+                    entry_price = trade['entry_price']
+                    tp_price = tp_info['price']
+                    if trade['direction'] == "BUY":
+                        profit_pct = ((tp_price - entry_price) / entry_price) * 100 * trade['leverage']
+                    else:
+                        profit_pct = ((entry_price - tp_price) / entry_price) * 100 * trade['leverage']
+                    
+                    record_tp(symbol, profit_pct)
+                    append_log("INFO", "TP", f"{symbol} Target #{tp_num} hit, ROI {profit_pct:.1f}%")
+                    symbol_name = symbol.replace('/USDT', '')
+                    message = f"💸 {symbol_name}\n✅ Target #{tp_num} Done\nCurrent profit: {profit_pct:.1f}%"
+                    await self.send_notification(message)
+                    trade[f'tp{tp_num}_notified'] = True
+                    logger.info(f"Target #{tp_num} achieved for {symbol}: {profit_pct:.1f}% profit")
+                    
+                    # Conditional TP/SL: cancel orphan SL so it does not open a ghost position
+                    sl_id = trade.get('sl_order_id')
+                    if sl_id:
+                        self.trader._cancel_conditional_order(symbol, sl_id)
+                        append_log("INFO", "SL", f"Canceled orphan SL for {symbol} (TP hit)")
+                    self.trader.active_trades.pop(symbol, None)
+                    return
+            
+            # 2) Check if SL was filled -> cancel TP(s) and remove from active_trades
+            sl_id = trade.get('sl_order_id')
+            if sl_id:
+                sl_status = self.trader._get_conditional_order_status(symbol, sl_id)
+                if sl_status == 'closed':
+                    for _, tp_info in trade['tp_orders'].items():
+                        if tp_info.get('order_id') and not str(tp_info.get('order_id', '')).startswith('dry_run'):
+                            self.trader._cancel_conditional_order(symbol, tp_info['order_id'])
+                    append_log("INFO", "SL", f"SL hit for {symbol}; canceled orphan TP(s)")
+                    self.trader.active_trades.pop(symbol, None)
+                    return
+            
+            # 3) If position is closed (manual close / liquidated), cancel all conditionals and remove
+            if not self.trader.dry_run:
                 try:
-                    order = self.trader.exchange.fetch_order(tp_info['order_id'], symbol)
-                    if order['status'] == 'closed' or order['status'] == 'filled':
-                        # Calculate profit percentage
-                        entry_price = trade['entry_price']
-                        tp_price = tp_info['price']
-                        
-                        if trade['direction'] == "BUY":
-                            profit_pct = ((tp_price - entry_price) / entry_price) * 100 * trade['leverage']
-                        else:  # SELL
-                            profit_pct = ((entry_price - tp_price) / entry_price) * 100 * trade['leverage']
-                        
-                        # Dashboard: record TP
-                        record_tp(symbol, profit_pct)
-                        append_log(
-                            "INFO",
-                            "TP",
-                            f"{symbol} Target #{tp_num} hit, ROI {profit_pct:.1f}%",
-                        )
-
-                        # Send achievement notification
-                        symbol_name = symbol.replace('/USDT', '')
-                        message = f"💸 {symbol_name}\n✅ Target #{tp_num} Done\nCurrent profit: {profit_pct:.1f}%"
-                        await self.send_notification(message)
-                        
-                        # Mark as notified
-                        trade[f'tp{tp_num}_notified'] = True
-                        
-                        logger.info(f"Target #{tp_num} achieved for {symbol}: {profit_pct:.1f}% profit")
-                        
+                    positions = self.trader.exchange.fetch_positions([symbol])
+                    sym_norm = symbol.replace('/', '')
+                    for p in positions:
+                        if (p.get('symbol') or '').replace('/', '') != sym_norm:
+                            continue
+                        contracts = float(p.get('contracts', 0) or 0)
+                        if contracts == 0:
+                            if sl_id:
+                                self.trader._cancel_conditional_order(symbol, sl_id)
+                            for _, tp_info in trade['tp_orders'].items():
+                                if tp_info.get('order_id') and not str(tp_info.get('order_id', '')).startswith('dry_run'):
+                                    self.trader._cancel_conditional_order(symbol, tp_info['order_id'])
+                            append_log("INFO", "TRADE", f"Position closed for {symbol}; canceled conditional SL/TP")
+                            self.trader.active_trades.pop(symbol, None)
+                        break
                 except Exception as e:
-                    logger.debug(f"Error checking order {tp_info['order_id']}: {e}")
+                    logger.debug(f"Position check for {symbol}: {e}")
                     
         except Exception as e:
             logger.error(f"Error checking order status: {e}")
