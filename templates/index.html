@@ -2,121 +2,147 @@
 <html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
-    <title>Trading Bot Dashboard</title>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trading Bot · Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+              mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+            },
+          },
+        },
+      };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <style>
-      body { font-feature-settings: "cv11","ss01"; }
-      .log-line {
-        white-space: pre;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      }
+      body { font-feature-settings: "cv11", "ss01"; }
+      .log-line { font-family: 'JetBrains Mono', ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
+      .card { box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.2); }
+      .navbar { backdrop-filter: blur(8px); }
+      .badge-signal { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+      .badge-trade { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+      .badge-tp { background: rgba(52, 211, 153, 0.15); color: #34d399; }
+      .badge-error { background: rgba(248, 113, 113, 0.15); color: #f87171; }
+      .badge-info { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
     </style>
   </head>
-  <body class="h-full bg-slate-950 text-slate-100">
-    <div class="min-h-full flex justify-center py-8 px-4">
-      <div class="w-full max-w-6xl space-y-4">
-        <!-- Header -->
-        <div class="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2">
+  <body class="h-full bg-slate-950 text-slate-100 font-sans antialiased">
+    <!-- Navbar -->
+    <header class="navbar sticky top-0 z-10 border-b border-slate-800/80 bg-slate-900/80">
+      <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
+        <div class="flex items-center gap-3">
+          <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+          </div>
           <div>
-            <h1 class="text-xl font-semibold text-slate-50">🤖 Trading Bot Dashboard</h1>
-            <p class="text-xs text-slate-400">
-              Status, recent signals, trades, realized profits, and live logs.
-            </p>
-          </div>
-          <div
-            class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium
-                   bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/40"
-          >
-            <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span id="mode-pill">Mode: {{ 'DRY RUN' if mode == 'DRY RUN' else 'LIVE' }}</span>
+            <h1 class="text-base font-semibold tracking-tight text-white sm:text-lg">Trading Bot</h1>
+            <p class="text-xs text-slate-500">Binance Futures · Telegram signals</p>
           </div>
         </div>
-
-        <!-- Summary cards -->
-        <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
-          <div class="rounded-lg bg-slate-900/70 border border-slate-800 px-3 py-2">
-            <p class="text-[10px] uppercase tracking-[0.18em] text-slate-500 mb-1">Channel</p>
-            <p id="summary-channel" class="text-xs font-medium truncate">{{ channel_id }}</p>
+        <div class="flex items-center gap-4">
+          <div class="hidden items-center gap-2 text-sm text-slate-400 sm:flex">
+            <span class="text-slate-500">Uptime</span>
+            <span id="header-uptime" class="font-mono text-slate-300">{{ uptime }}</span>
           </div>
-          <div class="rounded-lg bg-slate-900/70 border border-slate-800 px-3 py-2">
-            <p class="text-[10px] uppercase tracking-[0.18em] text-slate-500 mb-1">Last Signal</p>
-            <p id="summary-signal" class="text-xs font-medium text-slate-100 truncate">-</p>
+          <div id="mode-pill" class="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium
+            {{ 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/30' if mode == 'DRY RUN' else 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/30' }}">
+            <span class="h-2 w-2 rounded-full {{ 'bg-amber-400' if mode == 'DRY RUN' else 'bg-emerald-400 animate-pulse' }}"></span>
+            <span>{{ mode }}</span>
           </div>
-          <div class="rounded-lg bg-slate-900/70 border border-slate-800 px-3 py-2">
-            <p class="text-[10px] uppercase tracking-[0.18em] text-slate-500 mb-1">Last Trade</p>
-            <p id="summary-trade" class="text-xs font-medium text-slate-100 truncate">-</p>
-          </div>
-          <div class="rounded-lg bg-slate-900/70 border border-slate-800 px-3 py-2">
-            <p class="text-[10px] uppercase tracking-[0.18em] text-slate-500 mb-1">Last TP / Profit</p>
-            <p id="summary-tp" class="text-xs font-medium text-emerald-400 truncate">-</p>
-          </div>
-          <div class="rounded-lg bg-slate-900/70 border border-rose-900/60 px-3 py-2">
-            <p class="text-[10px] uppercase tracking-[0.18em] text-slate-500 mb-1">Last Error</p>
-            <p id="summary-error" class="text-xs font-medium text-rose-400 truncate">-</p>
-          </div>
-        </div>
-
-        <!-- Second row: overview + logs -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <!-- Overview -->
-          <section class="lg:col-span-1 rounded-xl bg-slate-900/70 border border-slate-800 p-4">
-            <h2 class="text-sm font-semibold text-slate-100 mb-2">Behavior Overview</h2>
-            <ul class="list-disc list-inside text-xs text-slate-300 space-y-1">
-              <li>Monitors a Telegram channel for trading signals (Long / Short).</li>
-              <li>Uses <span class="font-semibold text-emerald-300">15% of balance</span> per trade.</li>
-              <li>Executes market entries on Binance USDT-M futures.</li>
-              <li>Sets stop loss at <span class="font-semibold text-rose-300">−170% ROI</span> (leverage-adjusted).</li>
-              <li>Closes <span class="font-semibold text-emerald-300">100% of position</span> at Target #1 (single TP).</li>
-              <li>Tracks active trades and realized TP profits.</li>
-              <li>Optionally sends Telegram notifications to a private chat.</li>
-            </ul>
-            <p class="mt-3 text-[11px] text-slate-500">
-              Tip: Use the log filters on the right to focus on signals &amp; trades or only errors.
-            </p>
-            <div class="mt-4 text-[11px] text-slate-500">
-              <p>Uptime: <span id="summary-uptime" class="font-mono">{{ uptime }}</span></p>
-            </div>
-          </section>
-
-          <!-- Live logs -->
-          <section class="lg:col-span-2 rounded-xl bg-slate-900/70 border border-slate-800 p-4">
-            <div class="flex items-center gap-2 mb-3">
-              <h2 class="text-sm font-semibold text-slate-100">Live Logs</h2>
-              <span class="ml-2 inline-flex items-center rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-                SSE · 1s stream
-              </span>
-              <div class="ml-auto flex items-center gap-2 text-[11px]">
-                <button
-                  id="filter-all"
-                  class="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 text-slate-100 text-[11px] filter-btn"
-                >
-                  All
-                </button>
-                <button
-                  id="filter-signal_trade"
-                  class="px-2 py-0.5 rounded border border-slate-700 bg-slate-900 text-slate-300 text-[11px] filter-btn"
-                >
-                  Signals &amp; Trades
-                </button>
-                <button
-                  id="filter-error"
-                  class="px-2 py-0.5 rounded border border-slate-700 bg-rose-950 text-rose-300 text-[11px] filter-btn"
-                >
-                  Errors
-                </button>
-              </div>
-            </div>
-
-            <div
-              id="logs"
-              class="logs-container h-80 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/90 px-3 py-2"
-            >
-              <div class="log-line text-xs text-slate-500">Waiting for events…</div>
-            </div>
-          </section>
         </div>
       </div>
-    </div>
+    </header>
+
+    <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+      <!-- Metric cards -->
+      <section class="mb-6">
+        <h2 class="mb-3 text-xs font-medium uppercase tracking-wider text-slate-500">Overview</h2>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div class="card rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+            <p class="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">Channel</p>
+            <p id="summary-channel" class="truncate font-mono text-sm text-slate-200">{{ channel_id }}</p>
+          </div>
+          <div class="card rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+            <p class="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">Last Signal</p>
+            <p id="summary-signal" class="truncate font-mono text-sm text-slate-200">—</p>
+          </div>
+          <div class="card rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+            <p class="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">Last Trade</p>
+            <p id="summary-trade" class="truncate font-mono text-sm text-slate-200">—</p>
+          </div>
+          <div class="card rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+            <p class="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">Last TP / Profit</p>
+            <p id="summary-tp" class="truncate font-mono text-sm text-emerald-400">—</p>
+          </div>
+          <div class="card rounded-xl border border-slate-800/80 bg-slate-900/50 p-4">
+            <p class="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">Last Error</p>
+            <p id="summary-error" class="truncate font-mono text-sm text-rose-400">—</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <!-- Strategy card -->
+        <section class="lg:col-span-1">
+          <h2 class="mb-3 text-xs font-medium uppercase tracking-wider text-slate-500">Strategy</h2>
+          <div class="card rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+            <ul class="space-y-2.5 text-sm text-slate-300">
+              <li class="flex gap-2">
+                <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-600"></span>
+                <span>Telegram channel signals (Long / Short)</span>
+              </li>
+              <li class="flex gap-2">
+                <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500/60"></span>
+                <span><strong class="text-emerald-300">15%</strong> of balance per trade</span>
+              </li>
+              <li class="flex gap-2">
+                <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-600"></span>
+                <span>Binance USDT-M futures, market entry</span>
+              </li>
+              <li class="flex gap-2">
+                <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500/60"></span>
+                <span>Stop loss <strong class="text-rose-300">−170% ROI</strong> (conditional)</span>
+              </li>
+              <li class="flex gap-2">
+                <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500/60"></span>
+                <span>Take profit <strong class="text-emerald-300">100%</strong> at Target #1 (conditional)</span>
+              </li>
+              <li class="flex gap-2">
+                <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-600"></span>
+                <span>Orphan SL/TP canceled when position closes</span>
+              </li>
+            </ul>
+            <p class="mt-4 border-t border-slate-800 pt-3 text-xs text-slate-500">
+              Use log filters to focus on signals, trades, or errors.
+            </p>
+          </div>
+        </section>
+
+        <!-- Live logs -->
+        <section class="lg:col-span-2">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 class="text-xs font-medium uppercase tracking-wider text-slate-500">Live Logs</h2>
+            <div class="flex items-center gap-2">
+              <span class="rounded-md bg-slate-800 px-2 py-0.5 font-mono text-[10px] text-slate-400">SSE · 1s</span>
+              <div class="flex rounded-lg border border-slate-800 bg-slate-900/80 p-0.5">
+                <button id="filter-all" class="filter-btn rounded-md px-2.5 py-1 text-xs font-medium text-slate-300 transition focus:outline-none focus:ring-1 focus:ring-slate-600">All</button>
+                <button id="filter-signal_trade" class="filter-btn rounded-md px-2.5 py-1 text-xs font-medium text-slate-400 transition focus:outline-none focus:ring-1 focus:ring-slate-600">Signals & Trades</button>
+                <button id="filter-error" class="filter-btn rounded-md px-2.5 py-1 text-xs font-medium text-slate-400 transition focus:outline-none focus:ring-1 focus:ring-slate-600">Errors</button>
+              </div>
+            </div>
+          </div>
+          <div id="logs" class="logs-container h-96 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/90 px-4 py-3 font-mono text-xs">
+            <div class="log-line text-slate-500">Waiting for events…</div>
+          </div>
+        </section>
+      </div>
+    </main>
 
     <script>
       const stateUrl = "/api/state";
@@ -124,30 +150,37 @@
       let currentFilter = "all";
 
       function summarizeState(data) {
+        const empty = "—";
+        document.getElementById("summary-channel").textContent = data.channel_id || empty;
         if (data.last_signal) {
           const s = data.last_signal;
           document.getElementById("summary-signal").textContent =
-            `${s.symbol} · ${s.direction} · ${new Date(s.ts).toLocaleTimeString()}`;
+            `${s.symbol} ${s.direction} · ${new Date(s.ts).toLocaleTimeString()}`;
+        } else {
+          document.getElementById("summary-signal").textContent = empty;
         }
-
         if (data.last_trade) {
           const t = data.last_trade;
           document.getElementById("summary-trade").textContent =
-            `${t.symbol} · ${t.direction} · ${t.entry_price} · qty ${Number(t.qty).toFixed(3)}`;
+            `${t.symbol} ${t.direction} @ ${Number(t.entry_price).toFixed(2)} · qty ${Number(t.qty).toFixed(3)}`;
+        } else {
+          document.getElementById("summary-trade").textContent = empty;
         }
-
         if (data.last_tp) {
           const tp = data.last_tp;
           document.getElementById("summary-tp").textContent =
-            `${tp.symbol} · ${Number(tp.roi_pct).toFixed(1)}% · ${new Date(tp.ts).toLocaleTimeString()}`;
+            `${tp.symbol} +${Number(tp.roi_pct).toFixed(1)}% · ${new Date(tp.ts).toLocaleTimeString()}`;
+        } else {
+          document.getElementById("summary-tp").textContent = empty;
         }
-
         if (data.last_error) {
-          document.getElementById("summary-error").textContent = data.last_error.message;
+          const msg = data.last_error.message || "";
+          document.getElementById("summary-error").textContent = msg.length > 60 ? msg.slice(0, 57) + "…" : msg;
+        } else {
+          document.getElementById("summary-error").textContent = empty;
         }
-
         if (data.uptime) {
-          document.getElementById("summary-uptime").textContent = data.uptime;
+          document.getElementById("header-uptime").textContent = data.uptime;
         }
       }
 
@@ -163,33 +196,46 @@
         }
       }
 
+      function tagToBadgeClass(tag) {
+        if (tag === "SIGNAL") return "badge-signal";
+        if (tag === "TRADE") return "badge-trade";
+        if (tag === "TP") return "badge-tp";
+        if (tag === "SL") return "badge-trade";
+        return "badge-info";
+      }
+
       function createLogLine(log) {
         const div = document.createElement("div");
-        div.className = "log-line text-xs";
+        div.className = "log-line flex items-start gap-2 py-1 border-b border-slate-800/50 last:border-0";
         const level = (log.level || "INFO").toUpperCase();
         const tag = log.tag || "";
         const msg = log.message || "";
 
-        let colorClass = "text-slate-200";
-        if (level === "ERROR") colorClass = "text-rose-400";
-        else if (tag === "TP" || msg.includes("Target #1 achieved")) colorClass = "text-emerald-300";
-        else if (tag === "SIGNAL") colorClass = "text-sky-300";
-        div.classList.add(...colorClass.split(" "));
+        let msgClass = "text-slate-300";
+        if (level === "ERROR") msgClass = "text-rose-400";
+        else if (tag === "TP" || msg.includes("Target #") && msg.includes("hit")) msgClass = "text-emerald-300";
+        else if (tag === "SIGNAL") msgClass = "text-sky-300";
+        else if (tag === "TRADE" || tag === "SL") msgClass = "text-slate-200";
+
+        const ts = new Date(log.ts || Date.now()).toLocaleTimeString("en-GB", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        div.innerHTML = `
+          <span class="shrink-0 text-slate-500">${ts}</span>
+          <span class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${tagToBadgeClass(tag)}">${tag || "INFO"}</span>
+          <span class="${msgClass} flex-1 break-words">${escapeHtml(msg)}</span>
+        `;
 
         div.dataset.type =
-          tag === "SIGNAL"
-            ? "signal"
-            : tag === "TRADE"
-            ? "trade"
-            : tag === "TP"
-            ? "tp"
-            : level === "ERROR"
-            ? "error"
-            : "info";
-
-        const ts = new Date(log.ts || Date.now()).toLocaleTimeString();
-        div.textContent = `[${ts}] [${level}] [${tag}] ${msg}`;
+          tag === "SIGNAL" ? "signal" :
+          tag === "TRADE" || tag === "SL" ? "trade" :
+          tag === "TP" ? "tp" :
+          level === "ERROR" ? "error" : "info";
         return div;
+      }
+
+      function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
       }
 
       function shouldShowLine(line) {
@@ -206,19 +252,19 @@
           signal_trade: document.getElementById("filter-signal_trade"),
           error: document.getElementById("filter-error"),
         };
+        const activeClass = "bg-slate-700 text-white";
         Object.entries(map).forEach(([name, btn]) => {
           btn.addEventListener("click", () => {
             currentFilter = name;
-            Object.values(map).forEach((b) =>
-              b.classList.remove("border-emerald-500", "bg-emerald-500/20", "text-emerald-200")
-            );
-            btn.classList.add("border-emerald-500", "bg-emerald-500/20", "text-emerald-200");
+            Object.values(map).forEach((b) => b.classList.remove(activeClass));
+            btn.classList.add(activeClass);
             const container = document.getElementById("logs");
             Array.from(container.children).forEach((child) => {
               child.style.display = shouldShowLine(child) ? "" : "none";
             });
           });
         });
+        document.getElementById("filter-all").classList.add(activeClass);
       }
 
       function startLogStream() {
@@ -238,8 +284,8 @@
           }
         };
 
-        evtSource.onerror = (err) => {
-          console.error("SSE error", err);
+        evtSource.onerror = () => {
+          console.warn("SSE disconnected, reconnecting…");
         };
       }
 
@@ -251,4 +297,3 @@
     </script>
   </body>
 </html>
-

@@ -47,9 +47,31 @@ async def index(request: Request):
     )
 
 
+def _format_uptime(started_at):  # str | None -> str
+    if not started_at:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.utcnow()
+        delta = now - dt
+        total = int(delta.total_seconds())
+        if total < 0:
+            return "—"
+        h, r = divmod(total, 3600)
+        m, s = divmod(r, 60)
+        if h > 0:
+            return f"{h}h {m}m"
+        if m > 0:
+            return f"{m}m {s}s"
+        return f"{s}s"
+    except Exception:
+        return "—"
+
+
 @app.get("/api/state")
 async def api_state():
     state = get_state()
+    started_at = state.get("uptime_started_at")
     return {
         "mode": state.get("mode", "DRY RUN"),
         "channel_id": state.get("channel_id", "Not set"),
@@ -57,7 +79,8 @@ async def api_state():
         "last_trade": state.get("last_trade"),
         "last_tp": state.get("last_tp"),
         "last_error": state.get("last_error"),
-        "uptime": state.get("uptime_started_at"),
+        "uptime_started_at": started_at,
+        "uptime": _format_uptime(started_at),
     }
 
 
