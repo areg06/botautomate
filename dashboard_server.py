@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
-from dashboard_state import get_state
+from dashboard_state import get_state, get_balance_percent, set_balance_percent
 
 BASE_DIR = os.path.dirname(__file__)
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -43,6 +43,7 @@ async def index(request: Request):
             "mode": state.get("mode", "DRY RUN"),
             "channel_id": state.get("channel_id", "Not set"),
             "uptime": uptime_str,
+            "balance_percent": state.get("balance_percent", 15),
         },
     )
 
@@ -81,7 +82,28 @@ async def api_state():
         "last_error": state.get("last_error"),
         "uptime_started_at": started_at,
         "uptime": _format_uptime(started_at),
+        "balance_percent": state.get("balance_percent", 15),
     }
+
+
+@app.get("/api/config")
+async def get_config():
+    return {"balance_percent": get_balance_percent()}
+
+
+@app.post("/api/config")
+async def post_config(request: Request):
+    try:
+        body = await request.json()
+        percent = body.get("balance_percent")
+        if percent is None:
+            return {"ok": False, "error": "balance_percent required"}
+        p = float(percent)
+        p = max(1.0, min(100.0, p))
+        set_balance_percent(p)
+        return {"ok": True, "balance_percent": p}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/logs/stream")

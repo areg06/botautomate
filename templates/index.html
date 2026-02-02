@@ -88,8 +88,36 @@
       </section>
 
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <!-- Strategy card -->
-        <section class="lg:col-span-1">
+        <!-- Strategy + Settings -->
+        <section class="lg:col-span-1 space-y-6">
+          <!-- Balance % setting -->
+          <div>
+            <h2 class="mb-3 text-xs font-medium uppercase tracking-wider text-slate-500">Settings</h2>
+            <div class="card rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+              <label for="balance-percent" class="mb-2 block text-sm font-medium text-slate-300">Balance per trade (%)</label>
+              <p class="mb-3 text-xs text-slate-500">Share of account balance used for each position (1–100). Bot reads this value when opening trades.</p>
+              <div class="flex items-center gap-2">
+                <input
+                  id="balance-percent"
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="1"
+                  value="{{ balance_percent }}"
+                  class="w-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-sm text-slate-100 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+                <span class="text-sm text-slate-500">%</span>
+                <button
+                  id="save-balance-percent"
+                  type="button"
+                  class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+                >
+                  Save
+                </button>
+              </div>
+              <p id="balance-percent-feedback" class="mt-2 text-xs text-slate-500" aria-live="polite"></p>
+            </div>
+          </div>
           <h2 class="mb-3 text-xs font-medium uppercase tracking-wider text-slate-500">Strategy</h2>
           <div class="card rounded-xl border border-slate-800 bg-slate-900/50 p-4">
             <ul class="space-y-2.5 text-sm text-slate-300">
@@ -99,7 +127,7 @@
               </li>
               <li class="flex gap-2">
                 <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500/60"></span>
-                <span><strong class="text-emerald-300">15%</strong> of balance per trade</span>
+                <span><strong class="text-emerald-300" id="strategy-balance-pct">{{ balance_percent }}</strong>% of balance per trade</span>
               </li>
               <li class="flex gap-2">
                 <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-600"></span>
@@ -152,6 +180,12 @@
       function summarizeState(data) {
         const empty = "—";
         document.getElementById("summary-channel").textContent = data.channel_id || empty;
+        if (data.balance_percent != null) {
+          const input = document.getElementById("balance-percent");
+          if (input && String(input.value) !== String(data.balance_percent)) input.value = Number(data.balance_percent);
+          const strategyPct = document.getElementById("strategy-balance-pct");
+          if (strategyPct) strategyPct.textContent = Number(data.balance_percent);
+        }
         if (data.last_signal) {
           const s = data.last_signal;
           document.getElementById("summary-signal").textContent =
@@ -289,10 +323,51 @@
         };
       }
 
+      async function saveBalancePercent() {
+        const input = document.getElementById("balance-percent");
+        const feedback = document.getElementById("balance-percent-feedback");
+        const btn = document.getElementById("save-balance-percent");
+        const raw = input.value.trim();
+        const num = parseFloat(raw);
+        if (isNaN(num) || num < 1 || num > 100) {
+          feedback.textContent = "Enter a number between 1 and 100.";
+          feedback.className = "mt-2 text-xs text-rose-400";
+          return;
+        }
+        btn.disabled = true;
+        feedback.textContent = "Saving…";
+        feedback.className = "mt-2 text-xs text-slate-400";
+        try {
+          const resp = await fetch("/api/config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ balance_percent: num }),
+          });
+          const data = await resp.json();
+          if (data.ok) {
+            feedback.textContent = "Saved. Bot will use " + data.balance_percent + "% of balance per trade.";
+            feedback.className = "mt-2 text-xs text-emerald-400";
+            const strategyPct = document.getElementById("strategy-balance-pct");
+            if (strategyPct) strategyPct.textContent = data.balance_percent;
+          } else {
+            feedback.textContent = data.error || "Save failed.";
+            feedback.className = "mt-2 text-xs text-rose-400";
+          }
+        } catch (e) {
+          feedback.textContent = "Network error.";
+          feedback.className = "mt-2 text-xs text-rose-400";
+        }
+        btn.disabled = false;
+      }
+
       document.addEventListener("DOMContentLoaded", () => {
         setupFilters();
         pollState();
         startLogStream();
+        document.getElementById("save-balance-percent").addEventListener("click", saveBalancePercent);
+        document.getElementById("balance-percent").addEventListener("keydown", (e) => {
+          if (e.key === "Enter") saveBalancePercent();
+        });
       });
     </script>
   </body>

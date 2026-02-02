@@ -24,6 +24,7 @@ DEFAULT_STATE: Dict[str, Any] = {
     "uptime_started_at": None,
     "logs": [],  # list of {ts, level, tag, message}
     "max_logs": 500,
+    "balance_percent": 15,  # % of balance to use per trade (1–100)
 }
 
 
@@ -126,5 +127,24 @@ def append_log(level: str, tag: str, message: str) -> None:
         if len(logs) > max_logs:
             logs = logs[-max_logs:]
         state["logs"] = logs
+        _save_state(state)
+
+
+def get_balance_percent() -> float:
+    """Return balance percent (1–100) for position sizing. Default 15."""
+    with _LOCK:
+        state = _load_state()
+        p = state.get("balance_percent", 15)
+        try:
+            return max(1.0, min(100.0, float(p)))
+        except (TypeError, ValueError):
+            return 15.0
+
+
+def set_balance_percent(percent: float) -> None:
+    """Set balance percent (1–100). Used by bot for position sizing."""
+    with _LOCK:
+        state = _load_state()
+        state["balance_percent"] = max(1.0, min(100.0, float(percent)))
         _save_state(state)
 

@@ -39,6 +39,7 @@ try:
         record_tp,
         record_error,
         append_log,
+        get_balance_percent,
     )
 except Exception:  # pragma: no cover - dashboard is optional
     def update_status(*args, **kwargs):
@@ -58,6 +59,9 @@ except Exception:  # pragma: no cover - dashboard is optional
 
     def append_log(*args, **kwargs):
         pass
+
+    def get_balance_percent():
+        return 15.0
 
 # Custom log handler to store logs in memory for web display
 class WebLogHandler(logging.Handler):
@@ -301,7 +305,7 @@ class BinanceFuturesTrader:
     def calculate_position_size(self, balance: float, entry_price: float, leverage: float) -> float:
         """
         Calculate position size based on balance and leverage.
-        Uses 15% of account balance.
+        Uses balance_percent from dashboard config (default 15%).
         
         Args:
             balance: Available USDT balance
@@ -311,8 +315,8 @@ class BinanceFuturesTrader:
         Returns:
             Position size in base currency
         """
-        # Use 15% of balance for position
-        usable_balance = balance * 0.15
+        percent = get_balance_percent()
+        usable_balance = balance * (percent / 100.0)
         # Position size = (balance * leverage) / entry_price
         position_size = (usable_balance * leverage) / entry_price
         return float(Decimal(str(position_size)).quantize(Decimal('0.001'), rounding=ROUND_DOWN))
@@ -653,7 +657,7 @@ class BinanceFuturesTrader:
             logger.info(
                 "[TRADE] Position size\n"
                 f"  Size      : {position_size} {signal.symbol.split('/')[0]}\n"
-                f"  Balance   : {balance:.4f} USDT (15% used)"
+                f"  Balance   : {balance:.4f} USDT ({get_balance_percent():.0f}% used)"
             )
             append_log(
                 "INFO",
